@@ -1,0 +1,26 @@
+webserver:
+  port: 10160
+  host: 0.0.0.0
+  access-log:
+    format: "%h %u %t %r %s %b %{Referer}i %T"
+
+grpcserver:
+  host: 0.0.0.0
+  port: 10168
+
+tracing:
+  enabled: true
+  service: metadata-distributor
+  sampler-type: const
+  sampler-param: 1
+  protocol: http
+  host: localhost
+  port: 14268
+  path: /api/traces
+  paths:
+    - path: "/favicon.ico"
+      enabled: false
+    - path: "/metrics"
+      enabled: false
+    - path: "/health"
+      enabled: false

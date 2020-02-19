@@ -1,0 +1,8 @@
+grpcserver:
+  port: 0
+
+webserver:
+  port: 0
+
+tracing:
+  enabled: false
