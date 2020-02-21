@@ -227,7 +227,13 @@ public class MetadataRouter {
                         )
                 );
                 AtomicInteger succeeded = new AtomicInteger(0);
+
+                // TODO 1: read dataset-meta.json from location as specified in upstreamMessage
+
                 for (Publisher publisher : publishers) {
+
+                    // TODO 2: publish a downstream message that contains the dataset-meta.json file content (instead of the data-changed-event now published)
+
                     PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(upstreamMessage.getData()).build();
                     ApiFuture<String> publishResponseFuture = publisher.publish(downstreamMessage);
                     ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
