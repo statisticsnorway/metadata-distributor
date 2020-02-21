@@ -89,7 +89,7 @@ public class MetadataRouter {
                         if (!subscriptionExists(subscriptionAdminClient, upstreamProjectName, upstreamProjectSubscriptionName)) {
                             subscriptionAdminClient.createSubscription(upstreamProjectSubscriptionName, upstreamProjectTopicName, PushConfig.getDefaultInstance(), 10);
                         }
-                        MessageReceiver messageReceiver = new DataChangedReceiver(upstreamProjectTopicName, upstreamProjectSubscriptionName);
+                        MessageReceiver messageReceiver = new DataChangedReceiver(publishers, upstreamProjectTopicName, upstreamProjectSubscriptionName);
                         Subscriber subscriber = Subscriber.newBuilder(upstreamProjectSubscriptionName, messageReceiver)
                                 .setChannelProvider(this.channelProvider)
                                 .setCredentialsProvider(this.credentialsProvider)
@@ -201,11 +201,15 @@ public class MetadataRouter {
         return future;
     }
 
-    class DataChangedReceiver implements MessageReceiver {
+    static class DataChangedReceiver implements MessageReceiver {
+        private static final Logger LOG = LoggerFactory.getLogger(DataChangedReceiver.class);
+
+        final List<Publisher> publishers;
         final ProjectTopicName projectTopicName;
         final ProjectSubscriptionName projectSubscriptionName;
 
-        DataChangedReceiver(ProjectTopicName projectTopicName, ProjectSubscriptionName projectSubscriptionName) {
+        DataChangedReceiver(List<Publisher> publishers, ProjectTopicName projectTopicName, ProjectSubscriptionName projectSubscriptionName) {
+            this.publishers = publishers;
             this.projectTopicName = projectTopicName;
             this.projectSubscriptionName = projectSubscriptionName;
         }
@@ -214,33 +218,52 @@ public class MetadataRouter {
         public void receiveMessage(PubsubMessage upstreamMessage, AckReplyConsumer consumer) {
             try {
                 DataChangedRequest request = DataChangedRequest.parseFrom(upstreamMessage.getData());
-                System.out.printf("receiveMessage()%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n",
-                        projectTopicName.toString(),
-                        projectSubscriptionName.toString(),
-                        ProtobufJsonUtils.toString(request)
+                String upstreamJson = ProtobufJsonUtils.toString(request);
+                LOG.debug(
+                        String.format("receiveMessage()%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n",
+                                projectTopicName.toString(),
+                                projectSubscriptionName.toString(),
+                                upstreamJson
+                        )
                 );
+                AtomicInteger succeeded = new AtomicInteger(0);
+                for (Publisher publisher : publishers) {
+                    PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(upstreamMessage.getData()).build();
+                    ApiFuture<String> publishResponseFuture = publisher.publish(downstreamMessage);
+                    ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
+                                @Override
+                                public void onFailure(Throwable throwable) {
+                                    try {
+                                        String upstreamJson = ProtobufJsonUtils.toString(DataChangedRequest.parseFrom(upstreamMessage.getData()));
+                                        LOG.error(
+                                                String.format("receiveMessage()%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n",
+                                                        projectTopicName.toString(),
+                                                        projectSubscriptionName.toString(),
+                                                        upstreamJson
+                                                ),
+                                                throwable
+                                        );
+                                    } catch (InvalidProtocolBufferException e) {
+                                        throw new RuntimeException(e);
+                                    } finally {
+                                        consumer.nack(); // force re-delivery
+                                    }
+                                }
+
+                                @Override
+                                public void onSuccess(String result) {
+                                    if (succeeded.incrementAndGet() == publishers.size()) {
+                                        consumer.ack();
+                                    }
+                                }
+                            },
+                            MoreExecutors.directExecutor()
+                    );
+                }
             } catch (InvalidProtocolBufferException e) {
                 throw new RuntimeException(e);
-            }
-            AtomicInteger succeeded = new AtomicInteger(0);
-            for (Publisher publisher : publishers) {
-                PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(upstreamMessage.getData()).build();
-                ApiFuture<String> publishResponseFuture = publisher.publish(downstreamMessage);
-                ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
-                            @Override
-                            public void onFailure(Throwable t) {
-                                consumer.nack(); // force re-delivery
-                            }
-
-                            @Override
-                            public void onSuccess(String result) {
-                                if (succeeded.incrementAndGet() == publishers.size()) {
-                                    consumer.ack();
-                                }
-                            }
-                        },
-                        MoreExecutors.directExecutor()
-                );
+            } finally {
+                consumer.nack(); // force re-delivery
             }
         }
     }
