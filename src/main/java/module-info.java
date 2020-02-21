@@ -46,5 +46,10 @@ module no.ssb.dapla.metadata.distributor {
 
     requires no.ssb.dapla.metadata.distributor.protobuf;
 
+    requires gax;
+    requires com.google.api.apicommon;
+    requires google.cloud.pubsub;
+    requires proto.google.cloud.pubsub.v1;
+
     provides no.ssb.helidon.application.HelidonApplicationBuilder with no.ssb.dapla.metadata.distributor.ApplicationBuilder;
 }

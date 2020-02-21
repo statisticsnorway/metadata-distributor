@@ -1,5 +1,10 @@
 package no.ssb.dapla.metadata.distributor;
 
+import com.google.api.gax.core.CredentialsProvider;
+import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.api.gax.grpc.GrpcTransportChannel;
+import com.google.api.gax.rpc.FixedTransportChannelProvider;
+import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
 import io.helidon.config.Config;
@@ -17,16 +22,23 @@ import io.helidon.webserver.accesslog.AccessLogSupport;
 import io.opentracing.Tracer;
 import io.opentracing.contrib.grpc.OperationNameConstructor;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataDistributorGrpcService;
+import no.ssb.dapla.metadata.distributor.dataset.MetadataRouter;
 import no.ssb.dapla.metadata.distributor.health.Health;
 import no.ssb.dapla.metadata.distributor.health.ReadinessSample;
 import no.ssb.helidon.application.AuthorizationInterceptor;
 import no.ssb.helidon.application.DefaultHelidonApplication;
+import no.ssb.helidon.application.HelidonApplication;
 import no.ssb.helidon.application.HelidonGrpcWebTranscoding;
 import no.ssb.helidon.media.protobuf.ProtobufJsonSupport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -54,16 +66,32 @@ public class Application extends DefaultHelidonApplication {
                 });
     }
 
+    final List<MetadataRouter> metadataRouters = new CopyOnWriteArrayList<>();
+
     Application(Config config, Tracer tracer) {
         put(Config.class, config);
 
         AtomicReference<ReadinessSample> lastReadySample = new AtomicReference<>(new ReadinessSample(false, System.currentTimeMillis()));
 
-        // initialize health, including a database connectivity wait-loop
         Health health = new Health(config, lastReadySample, () -> get(WebServer.class));
 
-        MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService();
+        String hostport = System.getenv("PUBSUB_EMULATOR_HOST");
+        if (hostport == null) {
+            hostport = "localhost:8538";
+        }
+
+        ManagedChannel pubSubChannel = ManagedChannelBuilder.forTarget(hostport).usePlaintext().build();
+        put(ManagedChannel.class, pubSubChannel);
+
+        FixedTransportChannelProvider channelProvider = FixedTransportChannelProvider.create(GrpcTransportChannel.create(pubSubChannel));
+        CredentialsProvider credentialsProvider = NoCredentialsProvider.create();
+
+        MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(channelProvider, credentialsProvider);
         put(MetadataDistributorGrpcService.class, distributorGrpcService);
+
+        config.get("metadata-routing").asNodeList().get().stream().forEach(routing -> {
+            metadataRouters.add(new MetadataRouter(routing, channelProvider, credentialsProvider));
+        });
 
         GrpcServer grpcServer = GrpcServer.create(
                 GrpcServerConfiguration.builder(config.get("grpcserver"))
@@ -114,5 +142,36 @@ public class Application extends DefaultHelidonApplication {
                         .build(),
                 routing);
         put(WebServer.class, webServer);
+    }
+
+    @Override
+    public CompletionStage<HelidonApplication> stop() {
+        return super.stop()
+                .thenCombine(CompletableFuture.supplyAsync(() -> {
+
+                    List<CompletableFuture<MetadataRouter>> metadataRouterFutures = new ArrayList<>();
+                    for (MetadataRouter metadataRouter : metadataRouters) {
+                        metadataRouterFutures.add(metadataRouter.shutdown());
+                    }
+                    CompletableFuture<Void> allMetadataRouterFutures = CompletableFuture.allOf(metadataRouterFutures.toArray(new CompletableFuture[0]));
+                    allMetadataRouterFutures
+                            .orTimeout(10, TimeUnit.SECONDS)
+                            .join();
+
+                    ManagedChannel channel = get(ManagedChannel.class);
+                    channel.shutdown();
+                    try {
+                        if (!channel.awaitTermination(3, TimeUnit.SECONDS)) {
+                            channel.shutdownNow();
+                            if (!channel.awaitTermination(3, TimeUnit.SECONDS)) {
+                                throw new RuntimeException("Unable to close channel");
+                            }
+                        }
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    return this;
+                }), (app1, app2) -> app1)
+                .thenCombine(get(MetadataDistributorGrpcService.class).shutdown(), (app, service) -> app);
     }
 }

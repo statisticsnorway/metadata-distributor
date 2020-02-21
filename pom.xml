@@ -45,6 +45,10 @@
             <groupId>no.ssb.dapla</groupId>
             <artifactId>metadata-distributor-protobuf</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-pubsub</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

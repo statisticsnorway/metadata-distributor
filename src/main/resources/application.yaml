@@ -24,3 +24,19 @@ tracing:
       enabled: false
     - path: "/health"
       enabled: false
+
+metadata-routing:
+  - upstream:
+      - projectId: dapla
+        topic: file-events-1
+        subscription: metadata-distributor-catalog
+    downstream:
+      - projectId: dapla
+        topic: catalog-1
+  - upstream:
+      - projectId: dapla
+        topic: file-events-1
+        subscription: metadata-distributor-lineage
+    downstream:
+      - projectId: dapla
+        topic: lineage

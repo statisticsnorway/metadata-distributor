@@ -24,14 +24,20 @@ class MetadataDistributorGrpcServiceTest {
     Channel channel;
 
     @Test
-    void thatThisWorks() {
+    void thatThisWorks() throws InterruptedException {
         MetadataDistributorServiceBlockingStub distributor = MetadataDistributorServiceGrpc.newBlockingStub(channel);
-        DataChangedResponse response = distributor.dataChanged(DataChangedRequest.newBuilder()
-                .setParentUri("gs://my-bucket")
-                .setPath("/path/to/dataset")
-                .setVersion(1582106920814L)
-                .setFilename("metadata.json")
-                .build());
-        assertThat(response.getTxId()).isNotNull();
+        for (int i = 0; i < 1; i++) {
+            DataChangedResponse response = distributor.dataChanged(DataChangedRequest.newBuilder()
+                    .setProjectId("dapla")
+                    .setTopicName("file-events-1")
+                    .setParentUri("gs://my-bucket")
+                    .setPath("/path/to/dataset-" + i)
+                    .setVersion(1582106920814L)
+                    .setFilename("dataset-meta.json")
+                    .build());
+            assertThat(response.getTxId()).isNotNull();
+        }
+
+        Thread.sleep(4000);
     }
 }
