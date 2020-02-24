@@ -14,6 +14,7 @@ import com.google.cloud.pubsub.v1.SubscriptionAdminSettings;
 import com.google.cloud.pubsub.v1.TopicAdminClient;
 import com.google.cloud.pubsub.v1.TopicAdminSettings;
 import com.google.common.util.concurrent.MoreExecutors;
+import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.pubsub.v1.ListSubscriptionsRequest;
 import com.google.pubsub.v1.ListTopicsRequest;
@@ -25,17 +26,23 @@ import com.google.pubsub.v1.PushConfig;
 import com.google.pubsub.v1.Subscription;
 import com.google.pubsub.v1.Topic;
 import io.helidon.config.Config;
+import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MetadataRouter {
 
@@ -201,6 +208,29 @@ public class MetadataRouter {
         return future;
     }
 
+    static DatasetMeta resolveAndReadDatasetMeta(DataChangedRequest request) throws IOException {
+        DatasetMeta datasetMeta;
+        String parentUri = request.getParentUri();
+        Pattern parentUriPattern = Pattern.compile("(?<scheme>[^:]+):(?://(?<host>[^/]*))?(?<path>/[^/].*)");
+        Matcher m = parentUriPattern.matcher(parentUri);
+        if (!m.matches()) {
+            throw new RuntimeException("Invalid parentUri, does not conform to URI pattern: " + parentUriPattern.pattern());
+        }
+        String scheme = m.group("scheme");
+        switch (scheme) {
+            case "file":
+                Path pathToDatasetMetaJson = Path.of(m.group("path"), request.getPath() + "/" + request.getVersion() + "/dataset-meta.json");
+                String datasetMetaJson = Files.readString(pathToDatasetMetaJson, StandardCharsets.UTF_8);
+                datasetMeta = ProtobufJsonUtils.toPojo(datasetMetaJson, DatasetMeta.class);
+                break;
+            case "gs":
+                throw new RuntimeException("Fetch from Google Cloud Storage not yet implemented"); // TODO
+            default:
+                throw new RuntimeException("Scheme not supported. scheme='" + scheme + "'");
+        }
+        return datasetMeta;
+    }
+
     static class DataChangedReceiver implements MessageReceiver {
         private static final Logger LOG = LoggerFactory.getLogger(DataChangedReceiver.class);
 
@@ -228,23 +258,29 @@ public class MetadataRouter {
                 );
                 AtomicInteger succeeded = new AtomicInteger(0);
 
-                // TODO 1: read dataset-meta.json from location as specified in upstreamMessage
+                DatasetMeta datasetMeta = resolveAndReadDatasetMeta(request);
+                ByteString datasetMetaByteString = datasetMeta.toByteString();
 
                 for (Publisher publisher : publishers) {
-
-                    // TODO 2: publish a downstream message that contains the dataset-meta.json file content (instead of the data-changed-event now published)
-
-                    PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(upstreamMessage.getData()).build();
+                    PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(datasetMetaByteString).build();
                     ApiFuture<String> publishResponseFuture = publisher.publish(downstreamMessage);
                     ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
+                                @Override
+                                public void onSuccess(String result) {
+                                    if (succeeded.incrementAndGet() == publishers.size()) {
+                                        consumer.ack();
+                                    }
+                                }
+
                                 @Override
                                 public void onFailure(Throwable throwable) {
                                     try {
                                         String upstreamJson = ProtobufJsonUtils.toString(DataChangedRequest.parseFrom(upstreamMessage.getData()));
                                         LOG.error(
-                                                String.format("receiveMessage()%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n",
-                                                        projectTopicName.toString(),
-                                                        projectSubscriptionName.toString(),
+                                                String.format("Failed to publish message downstream. Sending nack upstream to force re-delivery.%s%n  downstream-topic: %s%n  upstream-topic: '%s'%n  upstream-subscription: '%s'%n  upstream-payload:%n%s%n",
+                                                        publisher.getTopicName(),
+                                                        projectTopicName,
+                                                        projectSubscriptionName,
                                                         upstreamJson
                                                 ),
                                                 throwable
@@ -255,21 +291,16 @@ public class MetadataRouter {
                                         consumer.nack(); // force re-delivery
                                     }
                                 }
-
-                                @Override
-                                public void onSuccess(String result) {
-                                    if (succeeded.incrementAndGet() == publishers.size()) {
-                                        consumer.ack();
-                                    }
-                                }
                             },
                             MoreExecutors.directExecutor()
                     );
                 }
             } catch (RuntimeException | Error e) {
+                LOG.error("Sending nack on message to force re-delivery", e);
                 consumer.nack();
                 throw e;
-            } catch (InvalidProtocolBufferException e) {
+            } catch (IOException e) {
+                LOG.error("Sending nack on message to force re-delivery", e);
                 consumer.nack();
                 throw new RuntimeException(e);
             }
