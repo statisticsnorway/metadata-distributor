@@ -31,11 +31,11 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
 
     private static final Logger LOG = LoggerFactory.getLogger(MetadataDistributorGrpcService.class);
 
-    final PubSub pubSubClient;
+    final PubSub pubSub;
     final Map<ProjectTopicName, Publisher> publisherByProjectTopicName = new ConcurrentHashMap<>();
 
-    public MetadataDistributorGrpcService(PubSub pubSubClient) {
-        this.pubSubClient = pubSubClient;
+    public MetadataDistributorGrpcService(PubSub pubSub) {
+        this.pubSub = pubSub;
     }
 
     @Override
@@ -45,7 +45,7 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
         try {
             String projectId = request.getProjectId();
             String topicName = request.getTopicName();
-            Publisher publisher = publisherByProjectTopicName.computeIfAbsent(ProjectTopicName.of(projectId, topicName), pubSubClient::getPublisher);
+            Publisher publisher = publisherByProjectTopicName.computeIfAbsent(ProjectTopicName.of(projectId, topicName), pubSub::getPublisher);
             PubsubMessage message = PubsubMessage.newBuilder().setData(request.toByteString()).build();
             ApiFuture<String> publishResponseFuture = publisher.publish(message); // async
             ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {

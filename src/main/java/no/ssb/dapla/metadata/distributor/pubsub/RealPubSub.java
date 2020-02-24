@@ -53,7 +53,7 @@ class RealPubSub implements PubSub {
 
     final CredentialsProvider credentialsProvider;
 
-    public RealPubSub(Config config) {
+    RealPubSub(Config config) {
         Credentials credentials = getCredentials(config);
         credentialsProvider = () -> credentials;
     }

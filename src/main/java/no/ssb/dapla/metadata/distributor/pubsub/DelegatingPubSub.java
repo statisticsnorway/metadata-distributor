@@ -9,11 +9,11 @@ import com.google.pubsub.v1.ProjectSubscriptionName;
 import com.google.pubsub.v1.ProjectTopicName;
 import io.helidon.config.Config;
 
-public class DelegatingPubSub implements PubSub {
+class DelegatingPubSub implements PubSub {
 
     final PubSub delegate;
 
-    public DelegatingPubSub(Config config) {
+    DelegatingPubSub(Config config) {
         boolean useEmulator = config.get("use-emulator").asBoolean().orElse(false);
         if (useEmulator) {
             Config emulatorConfig = config.get("emulator");

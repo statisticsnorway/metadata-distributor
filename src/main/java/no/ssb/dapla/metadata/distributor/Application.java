@@ -21,7 +21,8 @@ import no.ssb.dapla.metadata.distributor.dataset.MetadataDistributorGrpcService;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouter;
 import no.ssb.dapla.metadata.distributor.health.Health;
 import no.ssb.dapla.metadata.distributor.health.ReadinessSample;
-import no.ssb.dapla.metadata.distributor.pubsub.DelegatingPubSub;
+import no.ssb.dapla.metadata.distributor.pubsub.PubSub;
+import no.ssb.dapla.metadata.distributor.pubsub.PubSubInitializer;
 import no.ssb.helidon.application.AuthorizationInterceptor;
 import no.ssb.helidon.application.DefaultHelidonApplication;
 import no.ssb.helidon.application.HelidonApplication;
@@ -72,13 +73,13 @@ public class Application extends DefaultHelidonApplication {
 
         Health health = new Health(config, lastReadySample, () -> get(WebServer.class));
 
-        DelegatingPubSub pubSubInitializer = new DelegatingPubSub(config.get("pubsub"));
+        PubSub pubSub = PubSubInitializer.create(config.get("pubsub"));
 
-        MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(pubSubInitializer);
+        MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(pubSub);
         put(MetadataDistributorGrpcService.class, distributorGrpcService);
 
         config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
-            metadataRouters.add(new MetadataRouter(routing, pubSubInitializer));
+            metadataRouters.add(new MetadataRouter(routing, pubSub));
         });
 
         GrpcServer grpcServer = GrpcServer.create(

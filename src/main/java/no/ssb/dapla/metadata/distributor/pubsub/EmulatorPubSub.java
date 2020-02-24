@@ -25,7 +25,7 @@ class EmulatorPubSub implements PubSub {
     final FixedTransportChannelProvider channelProvider;
     final CredentialsProvider credentialsProvider;
 
-    public EmulatorPubSub(String host, int port) {
+    EmulatorPubSub(String host, int port) {
         this.host = host;
         this.port = port;
         pubSubChannel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();
