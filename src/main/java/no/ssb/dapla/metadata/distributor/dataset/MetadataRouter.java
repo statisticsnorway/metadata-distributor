@@ -7,6 +7,7 @@ import com.google.cloud.pubsub.v1.AckReplyConsumer;
 import com.google.cloud.pubsub.v1.MessageReceiver;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.Subscriber;
+import com.google.cloud.pubsub.v1.SubscriptionAdminClient;
 import com.google.cloud.pubsub.v1.TopicAdminClient;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
@@ -15,10 +16,11 @@ import com.google.pubsub.v1.ProjectName;
 import com.google.pubsub.v1.ProjectSubscriptionName;
 import com.google.pubsub.v1.ProjectTopicName;
 import com.google.pubsub.v1.PubsubMessage;
+import com.google.pubsub.v1.PushConfig;
 import io.helidon.config.Config;
 import no.ssb.dapla.dataset.api.DatasetMeta;
-import no.ssb.dapla.metadata.distributor.GooglePubSubInitializer;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
+import no.ssb.dapla.metadata.distributor.pubsub.DelegatingPubSub;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,57 +41,58 @@ public class MetadataRouter {
 
     private static final Logger LOG = LoggerFactory.getLogger(MetadataRouter.class);
 
-    final GooglePubSubInitializer pubSubManager;
-
+    final DelegatingPubSub pubSubManager;
     final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
     final List<Publisher> publishers = new CopyOnWriteArrayList<>();
 
-    public MetadataRouter(Config routeConfig, GooglePubSubInitializer pubSubManager) {
-        this.pubSubManager = pubSubManager;
+    public MetadataRouter(Config routeConfig, DelegatingPubSub pubSubInitializer) {
+        this.pubSubManager = pubSubInitializer;
 
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
 
-        for (Config downstream : downstreams) {
-            // ensure that topics exists
-            String downstreamProjectId = downstream.get("projectId").asString().get();
-            String downstreamTopic = downstream.get("topic").asString().get();
-            ProjectTopicName downstreamProjectTopicName = ProjectTopicName.of(downstreamProjectId, downstreamTopic);
-            try (TopicAdminClient topicAdminClient = pubSubManager.getTopicAdminClientSupplier().get()) {
-                if (!pubSubManager.topicExists(topicAdminClient, ProjectName.of(downstreamProjectId), downstreamProjectTopicName)) {
+        try (TopicAdminClient topicAdminClient = pubSubInitializer.getTopicAdminClient()) {
+            for (Config downstream : downstreams) {
+                // ensure that topics exists
+                String downstreamProjectId = downstream.get("projectId").asString().get();
+                String downstreamTopic = downstream.get("topic").asString().get();
+                ProjectTopicName downstreamProjectTopicName = ProjectTopicName.of(downstreamProjectId, downstreamTopic);
+                if (!pubSubInitializer.topicExists(topicAdminClient, ProjectName.of(downstreamProjectId), downstreamProjectTopicName)) {
                     topicAdminClient.createTopic(downstreamProjectTopicName);
                 }
+                // create downstream publisher
+                Publisher publisher = pubSubInitializer.getPublisher(downstreamProjectTopicName);
+                publishers.add(publisher);
             }
-            // create downstream publisher
-            Publisher publisher = pubSubManager.getPublisherFactory().apply(downstreamProjectTopicName);
-            publishers.add(publisher);
-        }
 
-        for (Config upstream : upstreams) {
-            String upstreamProjectId = upstream.get("projectId").asString().get();
-            ProjectName upstreamProjectName = ProjectName.of(upstreamProjectId);
-            String upstreamTopicName = upstream.get("topic").asString().get();
-            String upstreamSubscriptionName = upstream.get("subscription").asString().get();
-            ProjectTopicName upstreamProjectTopicName = ProjectTopicName.of(upstreamProjectId, upstreamTopicName);
-            ProjectSubscriptionName upstreamProjectSubscriptionName = ProjectSubscriptionName.of(upstreamProjectId, upstreamSubscriptionName);
+            try (SubscriptionAdminClient subscriptionAdminClient = pubSubInitializer.getSubscriptionAdminClient()) {
+                for (Config upstream : upstreams) {
+                    String upstreamProjectId = upstream.get("projectId").asString().get();
+                    ProjectName upstreamProjectName = ProjectName.of(upstreamProjectId);
+                    String upstreamTopicName = upstream.get("topic").asString().get();
+                    String upstreamSubscriptionName = upstream.get("subscription").asString().get();
+                    ProjectTopicName upstreamProjectTopicName = ProjectTopicName.of(upstreamProjectId, upstreamTopicName);
+                    ProjectSubscriptionName upstreamProjectSubscriptionName = ProjectSubscriptionName.of(upstreamProjectId, upstreamSubscriptionName);
 
-            try (TopicAdminClient topicAdminClient = pubSubManager.getTopicAdminClientSupplier().get()) {
-                if (!pubSubManager.topicExists(topicAdminClient, upstreamProjectName, upstreamProjectTopicName)) {
-                    topicAdminClient.createTopic(upstreamProjectTopicName);
+                    if (!pubSubInitializer.topicExists(topicAdminClient, upstreamProjectName, upstreamProjectTopicName)) {
+                        topicAdminClient.createTopic(upstreamProjectTopicName);
+                    }
+                    if (!pubSubInitializer.subscriptionExists(subscriptionAdminClient, upstreamProjectName, upstreamProjectSubscriptionName)) {
+                        subscriptionAdminClient.createSubscription(upstreamProjectSubscriptionName.toString(), upstreamProjectTopicName.toString(), PushConfig.getDefaultInstance(), 10);
+                    }
+                    MessageReceiver messageReceiver = new DataChangedReceiver(publishers, upstreamProjectTopicName, upstreamProjectSubscriptionName);
+                    Subscriber subscriber = pubSubInitializer.getSubscriber(upstreamProjectSubscriptionName, messageReceiver);
+                    subscriber.addListener(
+                            new Subscriber.Listener() {
+                                public void failed(Subscriber.State from, Throwable failure) {
+                                    LOG.error(String.format("Error with subscriber on subscription: '%s'", upstreamProjectSubscriptionName), failure);
+                                }
+                            },
+                            MoreExecutors.directExecutor());
+                    subscriber.startAsync().awaitRunning();
+                    subscribers.add(subscriber);
                 }
             }
-            MessageReceiver messageReceiver = new DataChangedReceiver(publishers, upstreamProjectTopicName, upstreamProjectSubscriptionName);
-            Subscriber subscriber = pubSubManager.getSubscriberFactory().apply(new GooglePubSubInitializer.SubscriberConfig(
-                    upstreamProjectTopicName, upstreamProjectSubscriptionName, messageReceiver));
-            subscriber.addListener(
-                    new Subscriber.Listener() {
-                        public void failed(Subscriber.State from, Throwable failure) {
-                            LOG.error(String.format("Error with subscriber on subscription: '%s'", upstreamProjectSubscriptionName), failure);
-                        }
-                    },
-                    MoreExecutors.directExecutor());
-            subscriber.startAsync().awaitRunning();
-            subscribers.add(subscriber);
         }
     }
 

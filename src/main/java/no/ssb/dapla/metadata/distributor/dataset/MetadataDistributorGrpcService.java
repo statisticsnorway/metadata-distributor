@@ -12,6 +12,7 @@ import io.opentracing.Span;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
 import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc;
+import no.ssb.dapla.metadata.distributor.pubsub.PubSub;
 import no.ssb.helidon.application.TracerAndSpan;
 import no.ssb.helidon.application.Tracing;
 import org.slf4j.Logger;
@@ -22,7 +23,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 
 import static no.ssb.helidon.application.Tracing.restoreTracingContext;
 import static no.ssb.helidon.application.Tracing.spanFromGrpc;
@@ -31,11 +31,11 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
 
     private static final Logger LOG = LoggerFactory.getLogger(MetadataDistributorGrpcService.class);
 
-    final Function<ProjectTopicName, Publisher> publisherFactory;
+    final PubSub pubSubClient;
     final Map<ProjectTopicName, Publisher> publisherByProjectTopicName = new ConcurrentHashMap<>();
 
-    public MetadataDistributorGrpcService(Function<ProjectTopicName, Publisher> publisherFactory) {
-        this.publisherFactory = publisherFactory;
+    public MetadataDistributorGrpcService(PubSub pubSubClient) {
+        this.pubSubClient = pubSubClient;
     }
 
     @Override
@@ -45,22 +45,10 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
         try {
             String projectId = request.getProjectId();
             String topicName = request.getTopicName();
-            Publisher publisher = publisherByProjectTopicName.computeIfAbsent(ProjectTopicName.of(projectId, topicName), publisherFactory);
+            Publisher publisher = publisherByProjectTopicName.computeIfAbsent(ProjectTopicName.of(projectId, topicName), pubSubClient::getPublisher);
             PubsubMessage message = PubsubMessage.newBuilder().setData(request.toByteString()).build();
             ApiFuture<String> publishResponseFuture = publisher.publish(message); // async
             ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
-                @Override
-                public void onFailure(Throwable t) {
-                    try {
-                        restoreTracingContext(tracerAndSpan);
-                        LOG.error("while attempting to publish message to Google PubSub topic: " + publisher.getTopicNameString(), t);
-                        Tracing.logError(span, t, "while attempting to publish message to Google PubSub", "topic", publisher.getTopicNameString());
-                        responseObserver.onError(t);
-                    } finally {
-                        span.finish();
-                    }
-                }
-
                 @Override
                 public void onSuccess(String messageId) {
                     try {
@@ -69,6 +57,18 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
                         span.log(Map.of("event", "successfully published message", "messageId", messageId, "txId", txId));
                         responseObserver.onNext(DataChangedResponse.newBuilder().setTxId(txId).build());
                         responseObserver.onCompleted();
+                    } finally {
+                        span.finish();
+                    }
+                }
+
+                @Override
+                public void onFailure(Throwable t) {
+                    try {
+                        restoreTracingContext(tracerAndSpan);
+                        LOG.error("while attempting to publish message to Google PubSub topic: " + publisher.getTopicNameString(), t);
+                        Tracing.logError(span, t, "while attempting to publish message to Google PubSub", "topic", publisher.getTopicNameString());
+                        responseObserver.onError(t);
                     } finally {
                         span.finish();
                     }
