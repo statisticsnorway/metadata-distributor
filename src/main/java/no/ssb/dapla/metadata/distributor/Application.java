@@ -1,9 +1,5 @@
 package no.ssb.dapla.metadata.distributor;
 
-import com.google.api.gax.core.CredentialsProvider;
-import com.google.api.gax.core.NoCredentialsProvider;
-import com.google.api.gax.grpc.GrpcTransportChannel;
-import com.google.api.gax.rpc.FixedTransportChannelProvider;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
@@ -75,22 +71,13 @@ public class Application extends DefaultHelidonApplication {
 
         Health health = new Health(config, lastReadySample, () -> get(WebServer.class));
 
-        String hostport = System.getenv("PUBSUB_EMULATOR_HOST");
-        if (hostport == null) {
-            hostport = "localhost:8538";
-        }
+        GooglePubSubInitializer googlePubSubManager = new GooglePubSubInitializer(config.get("pubsub"));
 
-        ManagedChannel pubSubChannel = ManagedChannelBuilder.forTarget(hostport).usePlaintext().build();
-        put(ManagedChannel.class, pubSubChannel);
-
-        FixedTransportChannelProvider channelProvider = FixedTransportChannelProvider.create(GrpcTransportChannel.create(pubSubChannel));
-        CredentialsProvider credentialsProvider = NoCredentialsProvider.create();
-
-        MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(channelProvider, credentialsProvider);
+        MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(googlePubSubManager.getPublisherFactory());
         put(MetadataDistributorGrpcService.class, distributorGrpcService);
 
-        config.get("metadata-routing").asNodeList().get().stream().forEach(routing -> {
-            metadataRouters.add(new MetadataRouter(routing, channelProvider, credentialsProvider));
+        config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
+            metadataRouters.add(new MetadataRouter(routing, googlePubSubManager));
         });
 
         GrpcServer grpcServer = GrpcServer.create(
@@ -159,16 +146,18 @@ public class Application extends DefaultHelidonApplication {
                             .join();
 
                     ManagedChannel channel = get(ManagedChannel.class);
-                    channel.shutdown();
-                    try {
-                        if (!channel.awaitTermination(3, TimeUnit.SECONDS)) {
-                            channel.shutdownNow();
+                    if (channel != null) {
+                        channel.shutdown();
+                        try {
                             if (!channel.awaitTermination(3, TimeUnit.SECONDS)) {
-                                throw new RuntimeException("Unable to close channel");
+                                channel.shutdownNow();
+                                if (!channel.awaitTermination(3, TimeUnit.SECONDS)) {
+                                    throw new RuntimeException("Unable to close channel");
+                                }
                             }
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
                         }
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
                     }
                     return this;
                 }), (app1, app2) -> app1)

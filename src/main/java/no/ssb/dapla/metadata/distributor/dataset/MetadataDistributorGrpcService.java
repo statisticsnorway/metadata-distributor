@@ -3,8 +3,6 @@ package no.ssb.dapla.metadata.distributor.dataset;
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutureCallback;
 import com.google.api.core.ApiFutures;
-import com.google.api.gax.core.CredentialsProvider;
-import com.google.api.gax.rpc.TransportChannelProvider;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.pubsub.v1.ProjectTopicName;
@@ -19,12 +17,12 @@ import no.ssb.helidon.application.Tracing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import static no.ssb.helidon.application.Tracing.restoreTracingContext;
 import static no.ssb.helidon.application.Tracing.spanFromGrpc;
@@ -33,14 +31,11 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
 
     private static final Logger LOG = LoggerFactory.getLogger(MetadataDistributorGrpcService.class);
 
-    final TransportChannelProvider channelProvider;
-    final CredentialsProvider credentialsProvider;
-
+    final Function<ProjectTopicName, Publisher> publisherFactory;
     final Map<ProjectTopicName, Publisher> publisherByProjectTopicName = new ConcurrentHashMap<>();
 
-    public MetadataDistributorGrpcService(TransportChannelProvider channelProvider, CredentialsProvider credentialsProvider) {
-        this.channelProvider = channelProvider;
-        this.credentialsProvider = credentialsProvider;
+    public MetadataDistributorGrpcService(Function<ProjectTopicName, Publisher> publisherFactory) {
+        this.publisherFactory = publisherFactory;
     }
 
     @Override
@@ -50,16 +45,7 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
         try {
             String projectId = request.getProjectId();
             String topicName = request.getTopicName();
-            Publisher publisher = publisherByProjectTopicName.computeIfAbsent(ProjectTopicName.of(projectId, topicName), ptn -> {
-                try {
-                    return Publisher.newBuilder(ptn)
-                            .setChannelProvider(channelProvider)
-                            .setCredentialsProvider(credentialsProvider)
-                            .build();
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            });
+            Publisher publisher = publisherByProjectTopicName.computeIfAbsent(ProjectTopicName.of(projectId, topicName), publisherFactory);
             PubsubMessage message = PubsubMessage.newBuilder().setData(request.toByteString()).build();
             ApiFuture<String> publishResponseFuture = publisher.publish(message); // async
             ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {

@@ -51,6 +51,8 @@ module no.ssb.dapla.metadata.distributor {
     requires google.cloud.pubsub;
     requires proto.google.cloud.pubsub.v1;
     requires no.ssb.dapla.dataset.api;
+    requires com.google.auth.oauth2;
+    requires com.google.auth;
 
     provides no.ssb.helidon.application.HelidonApplicationBuilder with no.ssb.dapla.metadata.distributor.ApplicationBuilder;
 }
