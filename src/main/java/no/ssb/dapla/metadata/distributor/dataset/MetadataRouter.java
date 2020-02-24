@@ -266,10 +266,12 @@ public class MetadataRouter {
                             MoreExecutors.directExecutor()
                     );
                 }
+            } catch (RuntimeException | Error e) {
+                consumer.nack();
+                throw e;
             } catch (InvalidProtocolBufferException e) {
+                consumer.nack();
                 throw new RuntimeException(e);
-            } finally {
-                consumer.nack(); // force re-delivery
             }
         }
     }
