@@ -143,8 +143,17 @@ public class Application extends DefaultHelidonApplication {
             return new EmulatorPubSub(host, port);
         } else {
             String configuredProviderChoice = config.get("credential-provider").asString().orElse("default");
-            String serviceAccountKeyPath = config.get("credentials.service-account.path").asString().orElse(null);
-            return new RealPubSub(configuredProviderChoice, Optional.ofNullable(serviceAccountKeyPath));
+            if ("service-account".equalsIgnoreCase(configuredProviderChoice)) {
+                LOG.info("Running with the service-account google bigtable credentials provider");
+                String serviceAccountKeyPath = config.get("credentials.service-account.path").asString().orElse(null);
+                return RealPubSub.createWithServiceAccountKeyCredentials(serviceAccountKeyPath);
+            } else if ("compute-engine".equalsIgnoreCase(configuredProviderChoice)) {
+                LOG.info("Running with the compute-engine google bigtable credentials provider");
+                return RealPubSub.createWithComputeEngineCredentials();
+            } else { // default
+                LOG.info("Running with the default google bigtable credentials provider");
+                return RealPubSub.createWithDefaultCredentials();
+            }
         }
     }
 

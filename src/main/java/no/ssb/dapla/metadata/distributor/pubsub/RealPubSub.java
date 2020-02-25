@@ -1,7 +1,6 @@
 package no.ssb.dapla.metadata.distributor.pubsub;
 
 import com.google.api.gax.core.CredentialsProvider;
-import com.google.auth.Credentials;
 import com.google.auth.oauth2.ComputeEngineCredentials;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
@@ -21,38 +20,37 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.Optional;
 
 public class RealPubSub implements PubSub {
 
-    private static final Logger LOG = LoggerFactory.getLogger(RealPubSub.class);
-
-    private static Credentials getCredentials(String configuredProviderChoice, Optional<String> serviceAccountKeyPath) {
-        if ("service-account".equalsIgnoreCase(configuredProviderChoice)) {
-            LOG.info("Running with the service-account google bigtable credentials provider");
-            Path serviceAccountKeyFilePath = Path.of(serviceAccountKeyPath.get());
-            GoogleCredentials credentials;
-            try {
-                credentials = ServiceAccountCredentials.fromStream(
-                        Files.newInputStream(serviceAccountKeyFilePath, StandardOpenOption.READ));
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            return credentials;
-        } else if ("compute-engine".equalsIgnoreCase(configuredProviderChoice)) {
-            LOG.info("Running with the compute-engine google bigtable credentials provider");
-            return ComputeEngineCredentials.create();
-        } else { // default
-            LOG.info("Running with the default google bigtable credentials provider");
-            return null;
+    public static RealPubSub createWithServiceAccountKeyCredentials(String serviceAccountKeyPath) {
+        Path serviceAccountKeyFilePath = Path.of(serviceAccountKeyPath);
+        GoogleCredentials credentials;
+        try {
+            credentials = ServiceAccountCredentials.fromStream(
+                    Files.newInputStream(serviceAccountKeyFilePath, StandardOpenOption.READ));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
+        return new RealPubSub(() -> credentials);
     }
+
+    public static RealPubSub createWithComputeEngineCredentials() {
+        GoogleCredentials credentials = ComputeEngineCredentials.create();
+        return new RealPubSub(() -> credentials);
+    }
+
+    public static RealPubSub createWithDefaultCredentials() {
+        GoogleCredentials credentials = null;
+        return new RealPubSub(() -> credentials);
+    }
+
+    private static final Logger LOG = LoggerFactory.getLogger(RealPubSub.class);
 
     final CredentialsProvider credentialsProvider;
 
-    public RealPubSub(String configuredProviderChoice, Optional<String> serviceAccountKeyPath) {
-        Credentials credentials = getCredentials(configuredProviderChoice, serviceAccountKeyPath);
-        credentialsProvider = () -> credentials;
+    public RealPubSub(CredentialsProvider credentialsProvider) {
+        this.credentialsProvider = credentialsProvider;
     }
 
     @Override
