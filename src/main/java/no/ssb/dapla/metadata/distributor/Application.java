@@ -1,6 +1,5 @@
 package no.ssb.dapla.metadata.distributor;
 
-import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
 import io.helidon.config.Config;
@@ -40,6 +39,8 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static java.util.Optional.ofNullable;
 
 public class Application extends DefaultHelidonApplication {
 
@@ -160,8 +161,7 @@ public class Application extends DefaultHelidonApplication {
     @Override
     public CompletionStage<HelidonApplication> stop() {
         return super.stop()
-                .thenCombine(CompletableFuture.supplyAsync(() -> {
-
+                .thenCombine(CompletableFuture.runAsync(() -> {
                     List<CompletableFuture<MetadataRouter>> metadataRouterFutures = new ArrayList<>();
                     for (MetadataRouter metadataRouter : metadataRouters) {
                         metadataRouterFutures.add(metadataRouter.shutdown());
@@ -170,23 +170,8 @@ public class Application extends DefaultHelidonApplication {
                     allMetadataRouterFutures
                             .orTimeout(10, TimeUnit.SECONDS)
                             .join();
-
-                    ManagedChannel channel = get(ManagedChannel.class);
-                    if (channel != null) {
-                        channel.shutdown();
-                        try {
-                            if (!channel.awaitTermination(3, TimeUnit.SECONDS)) {
-                                channel.shutdownNow();
-                                if (!channel.awaitTermination(3, TimeUnit.SECONDS)) {
-                                    throw new RuntimeException("Unable to close channel");
-                                }
-                            }
-                        } catch (InterruptedException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                    return this;
-                }), (app1, app2) -> app1)
-                .thenCombine(get(MetadataDistributorGrpcService.class).shutdown(), (app, service) -> app);
+                }), (app, v) -> this)
+                .thenCombine(get(MetadataDistributorGrpcService.class).shutdown(), (app, service) -> app)
+                .thenCombine(CompletableFuture.runAsync(() -> ofNullable(get(PubSub.class)).ifPresent(PubSub::close)), (a, v) -> this);
     }
 }
