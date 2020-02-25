@@ -18,14 +18,14 @@ import io.grpc.ManagedChannelBuilder;
 
 import java.io.IOException;
 
-class EmulatorPubSub implements PubSub {
+public class EmulatorPubSub implements PubSub {
     final String host;
     final int port;
     final ManagedChannel pubSubChannel;
     final FixedTransportChannelProvider channelProvider;
     final CredentialsProvider credentialsProvider;
 
-    EmulatorPubSub(String host, int port) {
+    public EmulatorPubSub(String host, int port) {
         this.host = host;
         this.port = port;
         pubSubChannel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build();

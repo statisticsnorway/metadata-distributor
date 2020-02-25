@@ -14,7 +14,6 @@ import com.google.cloud.pubsub.v1.TopicAdminClient;
 import com.google.cloud.pubsub.v1.TopicAdminSettings;
 import com.google.pubsub.v1.ProjectSubscriptionName;
 import com.google.pubsub.v1.ProjectTopicName;
-import io.helidon.config.Config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,18 +21,16 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Optional;
 
-class RealPubSub implements PubSub {
+public class RealPubSub implements PubSub {
 
     private static final Logger LOG = LoggerFactory.getLogger(RealPubSub.class);
 
-    private static Credentials getCredentials(Config config) {
-        String configuredProviderChoice = config.get("credential-provider").asString().orElse("default");
+    private static Credentials getCredentials(String configuredProviderChoice, Optional<String> serviceAccountKeyPath) {
         if ("service-account".equalsIgnoreCase(configuredProviderChoice)) {
             LOG.info("Running with the service-account google bigtable credentials provider");
-            Path serviceAccountKeyFilePath = Path.of(config.get("credentials.service-account.path").asString()
-                    .orElseThrow(() -> new RuntimeException("'credentials.service-account.path' missing from bigtable config"))
-            );
+            Path serviceAccountKeyFilePath = Path.of(serviceAccountKeyPath.get());
             GoogleCredentials credentials;
             try {
                 credentials = ServiceAccountCredentials.fromStream(
@@ -53,8 +50,8 @@ class RealPubSub implements PubSub {
 
     final CredentialsProvider credentialsProvider;
 
-    RealPubSub(Config config) {
-        Credentials credentials = getCredentials(config);
+    public RealPubSub(String configuredProviderChoice, Optional<String> serviceAccountKeyPath) {
+        Credentials credentials = getCredentials(configuredProviderChoice, serviceAccountKeyPath);
         credentialsProvider = () -> credentials;
     }
 

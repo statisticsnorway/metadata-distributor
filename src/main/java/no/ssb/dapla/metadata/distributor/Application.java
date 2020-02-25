@@ -21,8 +21,9 @@ import no.ssb.dapla.metadata.distributor.dataset.MetadataDistributorGrpcService;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouter;
 import no.ssb.dapla.metadata.distributor.health.Health;
 import no.ssb.dapla.metadata.distributor.health.ReadinessSample;
+import no.ssb.dapla.metadata.distributor.pubsub.EmulatorPubSub;
 import no.ssb.dapla.metadata.distributor.pubsub.PubSub;
-import no.ssb.dapla.metadata.distributor.pubsub.PubSubInitializer;
+import no.ssb.dapla.metadata.distributor.pubsub.RealPubSub;
 import no.ssb.helidon.application.AuthorizationInterceptor;
 import no.ssb.helidon.application.DefaultHelidonApplication;
 import no.ssb.helidon.application.HelidonApplication;
@@ -73,7 +74,7 @@ public class Application extends DefaultHelidonApplication {
 
         Health health = new Health(config, lastReadySample, () -> get(WebServer.class));
 
-        PubSub pubSub = PubSubInitializer.create(config.get("pubsub"));
+        PubSub pubSub = createPubSub(config.get("pubsub"));
 
         MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(pubSub);
         put(MetadataDistributorGrpcService.class, distributorGrpcService);
@@ -131,6 +132,20 @@ public class Application extends DefaultHelidonApplication {
                         .build(),
                 routing);
         put(WebServer.class, webServer);
+    }
+
+    static PubSub createPubSub(Config config) {
+        boolean useEmulator = config.get("use-emulator").asBoolean().orElse(false);
+        if (useEmulator) {
+            Config emulatorConfig = config.get("emulator");
+            String host = emulatorConfig.get("host").asString().get();
+            int port = emulatorConfig.get("port").asInt().get();
+            return new EmulatorPubSub(host, port);
+        } else {
+            String configuredProviderChoice = config.get("credential-provider").asString().orElse("default");
+            String serviceAccountKeyPath = config.get("credentials.service-account.path").asString().orElse(null);
+            return new RealPubSub(configuredProviderChoice, Optional.ofNullable(serviceAccountKeyPath));
+        }
     }
 
     @Override
