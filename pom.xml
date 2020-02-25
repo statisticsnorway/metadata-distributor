@@ -6,7 +6,7 @@
     <parent>
         <groupId>no.ssb.dapla</groupId>
         <artifactId>application</artifactId>
-        <version>6</version>
+        <version>7</version>
         <relativePath/>
     </parent>
 
