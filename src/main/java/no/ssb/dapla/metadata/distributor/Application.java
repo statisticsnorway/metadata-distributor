@@ -21,14 +21,14 @@ import no.ssb.dapla.metadata.distributor.dataset.MetadataDistributorGrpcService;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouter;
 import no.ssb.dapla.metadata.distributor.health.Health;
 import no.ssb.dapla.metadata.distributor.health.ReadinessSample;
-import no.ssb.dapla.metadata.distributor.pubsub.EmulatorPubSub;
-import no.ssb.dapla.metadata.distributor.pubsub.PubSub;
-import no.ssb.dapla.metadata.distributor.pubsub.RealPubSub;
 import no.ssb.helidon.application.AuthorizationInterceptor;
 import no.ssb.helidon.application.DefaultHelidonApplication;
 import no.ssb.helidon.application.HelidonApplication;
 import no.ssb.helidon.application.HelidonGrpcWebTranscoding;
 import no.ssb.helidon.media.protobuf.ProtobufJsonSupport;
+import no.ssb.pubsub.EmulatorPubSub;
+import no.ssb.pubsub.PubSub;
+import no.ssb.pubsub.RealPubSub;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

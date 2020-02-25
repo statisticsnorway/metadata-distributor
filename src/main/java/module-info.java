@@ -46,6 +46,8 @@ module no.ssb.dapla.metadata.distributor {
 
     requires no.ssb.dapla.metadata.distributor.protobuf;
 
+    requires no.ssb.gcloud.pubsub;
+
     requires gax;
     requires com.google.api.apicommon;
     requires google.cloud.pubsub;

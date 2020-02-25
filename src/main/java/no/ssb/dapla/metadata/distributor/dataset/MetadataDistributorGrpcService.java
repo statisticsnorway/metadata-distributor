@@ -12,9 +12,9 @@ import io.opentracing.Span;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
 import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc;
-import no.ssb.dapla.metadata.distributor.pubsub.PubSub;
 import no.ssb.helidon.application.TracerAndSpan;
 import no.ssb.helidon.application.Tracing;
+import no.ssb.pubsub.PubSub;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

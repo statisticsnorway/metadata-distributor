@@ -20,8 +20,8 @@ import com.google.pubsub.v1.PushConfig;
 import io.helidon.config.Config;
 import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
-import no.ssb.dapla.metadata.distributor.pubsub.PubSub;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
+import no.ssb.pubsub.PubSub;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,7 +57,7 @@ public class MetadataRouter {
                 String downstreamProjectId = downstream.get("projectId").asString().get();
                 String downstreamTopic = downstream.get("topic").asString().get();
                 ProjectTopicName downstreamProjectTopicName = ProjectTopicName.of(downstreamProjectId, downstreamTopic);
-                if (!pubSub.topicExists(topicAdminClient, ProjectName.of(downstreamProjectId), downstreamProjectTopicName)) {
+                if (!pubSub.topicExists(topicAdminClient, ProjectName.of(downstreamProjectId), downstreamProjectTopicName, 25)) {
                     topicAdminClient.createTopic(downstreamProjectTopicName);
                 }
                 // create downstream publisher
@@ -74,10 +74,10 @@ public class MetadataRouter {
                     ProjectTopicName upstreamProjectTopicName = ProjectTopicName.of(upstreamProjectId, upstreamTopicName);
                     ProjectSubscriptionName upstreamProjectSubscriptionName = ProjectSubscriptionName.of(upstreamProjectId, upstreamSubscriptionName);
 
-                    if (!pubSub.topicExists(topicAdminClient, upstreamProjectName, upstreamProjectTopicName)) {
+                    if (!pubSub.topicExists(topicAdminClient, upstreamProjectName, upstreamProjectTopicName, 25)) {
                         topicAdminClient.createTopic(upstreamProjectTopicName);
                     }
-                    if (!pubSub.subscriptionExists(subscriptionAdminClient, upstreamProjectName, upstreamProjectSubscriptionName)) {
+                    if (!pubSub.subscriptionExists(subscriptionAdminClient, upstreamProjectName, upstreamProjectSubscriptionName, 25)) {
                         subscriptionAdminClient.createSubscription(upstreamProjectSubscriptionName.toString(), upstreamProjectTopicName.toString(), PushConfig.getDefaultInstance(), 10);
                     }
                     MessageReceiver messageReceiver = new DataChangedReceiver(publishers, upstreamProjectTopicName, upstreamProjectSubscriptionName);
