@@ -105,6 +105,12 @@ steps:
     depends_on:
       - sonarqube
 
+services:
+  - name: pubsub-emulator
+    image: statisticsnorway/pubsub-emulator:latest
+    ports:
+      - 8538
+
 ---
 kind: secret
 name: maven_servers
