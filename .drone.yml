@@ -106,7 +106,7 @@ steps:
       - sonarqube
 
 services:
-  - name: pubsub-emulator
+  - name: pubsub
     image: statisticsnorway/pubsub-emulator:latest
     ports:
       - 8538

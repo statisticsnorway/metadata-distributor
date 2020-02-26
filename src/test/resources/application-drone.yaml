@@ -10,7 +10,7 @@ tracing:
 pubsub:
   use-emulator: true
   emulator:
-    host: pubsub-emulator
+    host: pubsub
     port: 8538
   credential-provider: emulator
   metadata-routing:
