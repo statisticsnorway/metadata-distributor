@@ -19,6 +19,7 @@ import com.google.pubsub.v1.PubsubMessage;
 import com.google.pubsub.v1.PushConfig;
 import io.helidon.config.Config;
 import no.ssb.dapla.dataset.api.DatasetMeta;
+import no.ssb.dapla.dataset.uri.DatasetUri;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.PubSub;
@@ -34,8 +35,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public class MetadataRouter {
 
@@ -125,16 +124,16 @@ public class MetadataRouter {
 
     static DatasetMeta resolveAndReadDatasetMeta(DataChangedRequest request) throws IOException {
         DatasetMeta datasetMeta;
-        String parentUri = request.getParentUri();
-        Pattern parentUriPattern = Pattern.compile("(?<scheme>[^:]+):(?://(?<host>[^/]*))?(?<path>/[^/].*)");
-        Matcher m = parentUriPattern.matcher(parentUri);
-        if (!m.matches()) {
-            throw new RuntimeException("Invalid parentUri, does not conform to URI pattern: " + parentUriPattern.pattern());
-        }
-        String scheme = m.group("scheme");
+        DatasetUri datasetUri = DatasetUri.of(request.getParentUri(), request.getPath(), request.getVersion());
+        String scheme = datasetUri.toURI().getScheme();
         switch (scheme) {
             case "file":
-                Path pathToDatasetMetaJson = Path.of(m.group("path"), request.getPath() + "/" + request.getVersion() + "/dataset-meta.json");
+                Path pathToDatasetMetaJson = Path.of(
+                        datasetUri.getPathPrefix() +
+                                datasetUri.getPath()
+                                + "/" + request.getVersion()
+                                + "/" + request.getFilename()
+                );
                 String datasetMetaJson = Files.readString(pathToDatasetMetaJson, StandardCharsets.UTF_8);
                 datasetMeta = ProtobufJsonUtils.toPojo(datasetMetaJson, DatasetMeta.class);
                 break;
