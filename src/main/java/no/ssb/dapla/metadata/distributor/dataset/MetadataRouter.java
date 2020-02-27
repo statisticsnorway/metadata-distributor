@@ -164,7 +164,7 @@ public class MetadataRouter {
 
                 String upstreamJson = ProtobufJsonUtils.toString(request);
 
-                if (!"dataset-meta.json".equals(request.getFilename())) {
+                if (!".dataset-meta.json".equals(request.getFilename())) {
                     consumer.ack();
                     LOG.debug("Ignored DataChangedRequest message: {}", upstreamJson);
                     return;
