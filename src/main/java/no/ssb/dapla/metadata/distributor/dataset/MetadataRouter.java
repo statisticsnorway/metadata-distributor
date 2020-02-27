@@ -111,9 +111,6 @@ public class MetadataRouter {
                     while (!publisher.awaitTermination(3, TimeUnit.SECONDS)) {
                     }
                 }
-                for (Publisher publisher : publishers) {
-                    publisher.shutdown();
-                }
                 return this;
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
