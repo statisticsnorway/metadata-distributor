@@ -135,7 +135,7 @@ public class MetadataRouter {
                 break;
             case "gs":
                 String bucket = datasetUri.toURI().getHost();
-                byte[] datasetMetaBytes = storage.readAllBytes(BlobId.of(bucket, localPath));
+                byte[] datasetMetaBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(localPath)));
                 datasetMetaJson = new String(datasetMetaBytes, StandardCharsets.UTF_8);
                 break;
             default:
@@ -143,6 +143,10 @@ public class MetadataRouter {
         }
         DatasetMeta datasetMeta = ProtobufJsonUtils.toPojo(datasetMetaJson, DatasetMeta.class);
         return datasetMeta;
+    }
+
+    private static String stripLeadingSlashes(String input) {
+        return input.startsWith("/") ? stripLeadingSlashes(input.substring(1)) : input;
     }
 
     class DataChangedReceiver implements MessageReceiver {
