@@ -21,3 +21,6 @@ pubsub:
       downstream:
         - projectId: dapla
           topic: catalog-1
+
+cloud-storage:
+  enabled: false

@@ -6,7 +6,7 @@
     <parent>
         <groupId>no.ssb.dapla</groupId>
         <artifactId>application</artifactId>
-        <version>7</version>
+        <version>9</version>
         <relativePath/>
     </parent>
 
@@ -57,6 +57,10 @@
             <groupId>no.ssb.dapla</groupId>
             <artifactId>dataset-uri</artifactId>
             <version>0.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-storage</artifactId>
         </dependency>
     </dependencies>
 

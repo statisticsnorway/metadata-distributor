@@ -1,5 +1,11 @@
 package no.ssb.dapla.metadata.distributor;
 
+import com.google.auth.Credentials;
+import com.google.auth.oauth2.ComputeEngineCredentials;
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.auth.oauth2.ServiceAccountCredentials;
+import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.StorageOptions;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
 import io.helidon.config.Config;
@@ -31,7 +37,12 @@ import no.ssb.pubsub.RealPubSub;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -80,8 +91,10 @@ public class Application extends DefaultHelidonApplication {
         MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(pubSub);
         put(MetadataDistributorGrpcService.class, distributorGrpcService);
 
+        Storage storage = createStorage(config.get("cloud-storage"));
+
         config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
-            metadataRouters.add(new MetadataRouter(routing, pubSub));
+            metadataRouters.add(new MetadataRouter(routing, pubSub, storage));
         });
 
         GrpcServer grpcServer = GrpcServer.create(
@@ -145,16 +158,45 @@ public class Application extends DefaultHelidonApplication {
         } else {
             String configuredProviderChoice = config.get("credential-provider").asString().orElse("default");
             if ("service-account".equalsIgnoreCase(configuredProviderChoice)) {
-                LOG.info("Running with the service-account google bigtable credentials provider");
+                LOG.info("PubSub running with the service-account google credentials provider");
                 String serviceAccountKeyPath = config.get("credentials.service-account.path").asString().orElse(null);
                 return RealPubSub.createWithServiceAccountKeyCredentials(serviceAccountKeyPath);
             } else if ("compute-engine".equalsIgnoreCase(configuredProviderChoice)) {
-                LOG.info("Running with the compute-engine google bigtable credentials provider");
+                LOG.info("PubSub Running with the compute-engine google credentials provider");
                 return RealPubSub.createWithComputeEngineCredentials();
             } else { // default
-                LOG.info("Running with the default google bigtable credentials provider");
+                LOG.info("PubSub Running with the default google credentials provider");
                 return RealPubSub.createWithDefaultCredentials();
             }
+        }
+    }
+
+    static Storage createStorage(Config config) {
+        if (!config.get("enabled").asBoolean().orElse(false)) {
+            return null;
+        }
+        Credentials credentials = null;
+        String configuredProviderChoice = config.get("credential-provider").asString().orElse("default");
+        if ("service-account".equalsIgnoreCase(configuredProviderChoice)) {
+            LOG.info("Cloud Storage running with the service-account google credentials provider");
+            String serviceAccountKeyPath = config.get("credentials.service-account.path").asString().orElse(null);
+            credentials = createWithServiceAccountKeyCredentials(serviceAccountKeyPath)
+                    .createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_write"));
+        } else if ("compute-engine".equalsIgnoreCase(configuredProviderChoice)) {
+            LOG.info("Cloud Storage running with the compute-engine google credentials provider");
+            credentials = ComputeEngineCredentials.create()
+                    .createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_write"));
+        }
+        Storage storage = StorageOptions.newBuilder().setCredentials(credentials).build().getService();
+        return storage;
+    }
+
+    public static GoogleCredentials createWithServiceAccountKeyCredentials(String serviceAccountKeyPath) {
+        try {
+            Path serviceAccountKeyFilePath = Path.of(serviceAccountKeyPath);
+            return ServiceAccountCredentials.fromStream(Files.newInputStream(serviceAccountKeyFilePath, StandardOpenOption.READ));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 

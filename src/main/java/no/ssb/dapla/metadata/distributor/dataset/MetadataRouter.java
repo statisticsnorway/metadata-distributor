@@ -9,6 +9,8 @@ import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.Subscriber;
 import com.google.cloud.pubsub.v1.SubscriptionAdminClient;
 import com.google.cloud.pubsub.v1.TopicAdminClient;
+import com.google.cloud.storage.BlobId;
+import com.google.cloud.storage.Storage;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -41,11 +43,13 @@ public class MetadataRouter {
     private static final Logger LOG = LoggerFactory.getLogger(MetadataRouter.class);
 
     final PubSub pubSub;
+    final Storage storage;
     final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
     final List<Publisher> publishers = new CopyOnWriteArrayList<>();
 
-    public MetadataRouter(Config routeConfig, PubSub pubSub) {
+    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage) {
         this.pubSub = pubSub;
+        this.storage = storage;
 
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
@@ -119,32 +123,29 @@ public class MetadataRouter {
         return future;
     }
 
-    static DatasetMeta resolveAndReadDatasetMeta(DataChangedRequest request) throws IOException {
-        DatasetMeta datasetMeta;
+    DatasetMeta resolveAndReadDatasetMeta(DataChangedRequest request) throws IOException {
+        String datasetMetaJson;
         DatasetUri datasetUri = DatasetUri.of(request.getParentUri(), request.getPath(), request.getVersion());
+        String localPath = datasetUri.toURI().getPath() + "/" + request.getFilename();
         String scheme = datasetUri.toURI().getScheme();
         switch (scheme) {
             case "file":
-                Path pathToDatasetMetaJson = Path.of(
-                        datasetUri.getPathPrefix() +
-                                datasetUri.getPath()
-                                + "/" + request.getVersion()
-                                + "/" + request.getFilename()
-                );
-                String datasetMetaJson = Files.readString(pathToDatasetMetaJson, StandardCharsets.UTF_8);
-                datasetMeta = ProtobufJsonUtils.toPojo(datasetMetaJson, DatasetMeta.class);
+                Path pathToDatasetMetaJson = Path.of(localPath);
+                datasetMetaJson = Files.readString(pathToDatasetMetaJson, StandardCharsets.UTF_8);
                 break;
             case "gs":
-                throw new RuntimeException("Fetch from Google Cloud Storage not yet implemented"); // TODO
+                String bucket = datasetUri.toURI().getHost();
+                byte[] datasetMetaBytes = storage.readAllBytes(BlobId.of(bucket, localPath));
+                datasetMetaJson = new String(datasetMetaBytes, StandardCharsets.UTF_8);
+                break;
             default:
                 throw new RuntimeException("Scheme not supported. scheme='" + scheme + "'");
         }
+        DatasetMeta datasetMeta = ProtobufJsonUtils.toPojo(datasetMetaJson, DatasetMeta.class);
         return datasetMeta;
     }
 
-    static class DataChangedReceiver implements MessageReceiver {
-        private static final Logger LOG = LoggerFactory.getLogger(DataChangedReceiver.class);
-
+    class DataChangedReceiver implements MessageReceiver {
         final List<Publisher> publishers;
         final ProjectTopicName projectTopicName;
         final ProjectSubscriptionName projectSubscriptionName;
@@ -159,15 +160,23 @@ public class MetadataRouter {
         public void receiveMessage(PubsubMessage upstreamMessage, AckReplyConsumer consumer) {
             try {
                 DataChangedRequest request = DataChangedRequest.parseFrom(upstreamMessage.getData());
+                AtomicInteger succeeded = new AtomicInteger(0);
+
                 String upstreamJson = ProtobufJsonUtils.toString(request);
+
+                if (!"dataset-meta.json".equals(request.getFilename())) {
+                    consumer.ack();
+                    LOG.debug("Ignored DataChangedRequest message: {}", upstreamJson);
+                    return;
+                }
+
                 LOG.debug(
-                        String.format("receiveMessage()%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n",
+                        String.format("processing DataChangedRequest message%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n",
                                 projectTopicName.toString(),
                                 projectSubscriptionName.toString(),
                                 upstreamJson
                         )
                 );
-                AtomicInteger succeeded = new AtomicInteger(0);
 
                 DatasetMeta datasetMeta = resolveAndReadDatasetMeta(request);
                 ByteString datasetMetaByteString = datasetMeta.toByteString();

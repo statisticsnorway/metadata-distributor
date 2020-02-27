@@ -45,3 +45,12 @@ pubsub:
       downstream:
         - projectId: dapla
           topic: catalog-1
+
+cloud-storage:
+  enabled: false
+  credential-provider: service-account
+  credentials:
+    service-account:
+      path: secret/my-service-account-key.json
+    compute-engine:
+    default:

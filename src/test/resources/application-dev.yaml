@@ -34,3 +34,6 @@ pubsub:
       downstream:
         - projectId: dapla
           topic: lineage
+
+cloud-storage:
+  enabled: false

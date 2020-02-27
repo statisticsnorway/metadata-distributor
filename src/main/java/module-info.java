@@ -57,5 +57,8 @@ module no.ssb.dapla.metadata.distributor {
     requires com.google.auth.oauth2;
     requires com.google.auth;
 
+    requires google.cloud.storage;
+    requires google.cloud.core;
+
     provides no.ssb.helidon.application.HelidonApplicationBuilder with no.ssb.dapla.metadata.distributor.ApplicationBuilder;
 }
