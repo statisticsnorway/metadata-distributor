@@ -15,6 +15,7 @@ FROM alpine:latest
 # Resources from build image
 #
 COPY --from=build /linked /jdk/
+COPY run.sh /app/
 COPY target/libs /app/lib/
 COPY target/metadata-distributor-*.jar /app/lib/
 COPY target/classes/logback.xml /app/conf/
@@ -28,4 +29,5 @@ WORKDIR /app
 EXPOSE 10160
 EXPOSE 10168
 
-CMD ["java", "--add-exports=io.grpc/io.opencensus.common=gax", "--add-exports=io.grpc/io.opencensus.trace=gax", "--add-exports=io.grpc/io.opencensus.trace=com.google.api.client", "--add-exports=io.grpc/io.opencensus.trace.propagation=com.google.api.client", "--add-exports=io.grpc/io.opencensus.trace.export=com.google.api.client", "--add-exports=io.grpc/io.opencensus.common=com.google.api.client", "--add-exports=io.grpc/io.opencensus.trace.propagation=opencensus.contrib.http.util", "--add-exports=io.grpc/io.opencensus.trace=opencensus.contrib.http.util", "-p", "/app/lib", "-m", "no.ssb.dapla.metadata.distributor/no.ssb.dapla.metadata.distributor.Application"]
+#ENV JAVA_MODULE_SYSTEM_ENABLED=true
+CMD ["./run.sh"]
