@@ -7,18 +7,11 @@ import com.google.cloud.pubsub.v1.AckReplyConsumer;
 import com.google.cloud.pubsub.v1.MessageReceiver;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.Subscriber;
-import com.google.cloud.pubsub.v1.SubscriptionAdminClient;
-import com.google.cloud.pubsub.v1.TopicAdminClient;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.Storage;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.pubsub.v1.ProjectName;
-import com.google.pubsub.v1.ProjectSubscriptionName;
-import com.google.pubsub.v1.ProjectTopicName;
 import com.google.pubsub.v1.PubsubMessage;
-import com.google.pubsub.v1.PushConfig;
 import io.helidon.config.Config;
 import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.dataset.uri.DatasetUri;
@@ -54,73 +47,33 @@ public class MetadataRouter {
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
 
-        try (TopicAdminClient topicAdminClient = pubSub.getTopicAdminClient()) {
-            for (Config downstream : downstreams) {
-                // ensure that topics exists
-                String downstreamProjectId = downstream.get("projectId").asString().get();
-                String downstreamTopic = downstream.get("topic").asString().get();
-                ProjectTopicName downstreamProjectTopicName = ProjectTopicName.of(downstreamProjectId, downstreamTopic);
-                if (!pubSub.topicExists(topicAdminClient, ProjectName.of(downstreamProjectId), downstreamProjectTopicName, 25)) {
-                    topicAdminClient.createTopic(downstreamProjectTopicName);
-                }
-                // create downstream publisher
-                Publisher publisher = pubSub.getPublisher(downstreamProjectTopicName);
-                publishers.add(publisher);
-            }
-
-            try (SubscriptionAdminClient subscriptionAdminClient = pubSub.getSubscriptionAdminClient()) {
-                for (Config upstream : upstreams) {
-                    String upstreamProjectId = upstream.get("projectId").asString().get();
-                    ProjectName upstreamProjectName = ProjectName.of(upstreamProjectId);
-                    String upstreamTopicName = upstream.get("topic").asString().get();
-                    String upstreamSubscriptionName = upstream.get("subscription").asString().get();
-                    ProjectTopicName upstreamProjectTopicName = ProjectTopicName.of(upstreamProjectId, upstreamTopicName);
-                    ProjectSubscriptionName upstreamProjectSubscriptionName = ProjectSubscriptionName.of(upstreamProjectId, upstreamSubscriptionName);
-
-                    if (!pubSub.topicExists(topicAdminClient, upstreamProjectName, upstreamProjectTopicName, 25)) {
-                        topicAdminClient.createTopic(upstreamProjectTopicName);
-                    }
-                    if (!pubSub.subscriptionExists(subscriptionAdminClient, upstreamProjectName, upstreamProjectSubscriptionName, 25)) {
-                        subscriptionAdminClient.createSubscription(upstreamProjectSubscriptionName.toString(), upstreamProjectTopicName.toString(), PushConfig.getDefaultInstance(), 10);
-                    }
-                    MessageReceiver messageReceiver = new DataChangedReceiver(publishers, upstreamProjectTopicName, upstreamProjectSubscriptionName);
-                    Subscriber subscriber = pubSub.getSubscriber(upstreamProjectSubscriptionName, messageReceiver);
-                    subscriber.addListener(
-                            new Subscriber.Listener() {
-                                public void failed(Subscriber.State from, Throwable failure) {
-                                    LOG.error(String.format("Error with subscriber on subscription: '%s'", upstreamProjectSubscriptionName), failure);
-                                }
-                            },
-                            MoreExecutors.directExecutor());
-                    subscriber.startAsync().awaitRunning();
-                    subscribers.add(subscriber);
-                }
-            }
+        for (Config downstream : downstreams) {
+            String downstreamProjectId = downstream.get("projectId").asString().get();
+            String downstreamTopic = downstream.get("topic").asString().get();
+            LOG.info("Creating publisher on topic: {}", downstreamTopic);
+            Publisher publisher = pubSub.getPublisher(downstreamProjectId, downstreamTopic);
+            publishers.add(publisher);
         }
-    }
 
-    public CompletableFuture<MetadataRouter> shutdown() {
-        CompletableFuture<MetadataRouter> future = CompletableFuture.supplyAsync(() -> {
-            try {
-                for (Subscriber subscriber : subscribers) {
-                    subscriber.stopAsync();
-                }
-                for (Subscriber subscriber : subscribers) {
-                    subscriber.awaitTerminated();
-                }
-                for (Publisher publisher : publishers) {
-                    publisher.shutdown();
-                }
-                for (Publisher publisher : publishers) {
-                    while (!publisher.awaitTermination(3, TimeUnit.SECONDS)) {
-                    }
-                }
-                return this;
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-        });
-        return future;
+        for (Config upstream : upstreams) {
+            String upstreamProjectId = upstream.get("projectId").asString().get();
+            String upstreamTopicName = upstream.get("topic").asString().get();
+            String upstreamSubscriptionName = upstream.get("subscription").asString().get();
+
+            MessageReceiver messageReceiver = new DataChangedReceiver(upstreamProjectId, upstreamTopicName, upstreamSubscriptionName);
+            LOG.info("Creating subscriber on subscription: {}", upstreamSubscriptionName);
+            Subscriber subscriber = pubSub.getSubscriber(upstreamProjectId, upstreamSubscriptionName, messageReceiver);
+            subscriber.addListener(
+                    new Subscriber.Listener() {
+                        public void failed(Subscriber.State from, Throwable failure) {
+                            LOG.error(String.format("Error with subscriber on subscription: '%s'", upstreamSubscriptionName), failure);
+                        }
+                    },
+                    MoreExecutors.directExecutor());
+            subscriber.startAsync().awaitRunning();
+            LOG.info("Subscriber is ready to receive messages: {}", upstreamSubscriptionName);
+            subscribers.add(subscriber);
+        }
     }
 
     DatasetMeta resolveAndReadDatasetMeta(DataChangedRequest request) throws IOException {
@@ -150,14 +103,15 @@ public class MetadataRouter {
     }
 
     class DataChangedReceiver implements MessageReceiver {
-        final List<Publisher> publishers;
-        final ProjectTopicName projectTopicName;
-        final ProjectSubscriptionName projectSubscriptionName;
 
-        DataChangedReceiver(List<Publisher> publishers, ProjectTopicName projectTopicName, ProjectSubscriptionName projectSubscriptionName) {
-            this.publishers = publishers;
-            this.projectTopicName = projectTopicName;
-            this.projectSubscriptionName = projectSubscriptionName;
+        final String projectId;
+        final String topic;
+        final String subscription;
+
+        DataChangedReceiver(String projectId, String topic, String subscription) {
+            this.projectId = projectId;
+            this.topic = topic;
+            this.subscription = subscription;
         }
 
         @Override
@@ -174,13 +128,7 @@ public class MetadataRouter {
                     return;
                 }
 
-                LOG.debug(
-                        String.format("processing DataChangedRequest message%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n",
-                                projectTopicName.toString(),
-                                projectSubscriptionName.toString(),
-                                upstreamJson
-                        )
-                );
+                LOG.debug(String.format("processing DataChangedRequest message%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n", topic, subscription, upstreamJson));
 
                 DatasetMeta datasetMeta = resolveAndReadDatasetMeta(request);
                 ByteString datasetMetaByteString = datasetMeta.toByteString();
@@ -198,36 +146,49 @@ public class MetadataRouter {
 
                                 @Override
                                 public void onFailure(Throwable throwable) {
-                                    try {
-                                        String upstreamJson = ProtobufJsonUtils.toString(DataChangedRequest.parseFrom(upstreamMessage.getData()));
-                                        LOG.error(
-                                                String.format("Failed to publish message downstream. Sending nack upstream to force re-delivery.%s%n  downstream-topic: %s%n  upstream-topic: '%s'%n  upstream-subscription: '%s'%n  upstream-payload:%n%s%n",
-                                                        publisher.getTopicName(),
-                                                        projectTopicName,
-                                                        projectSubscriptionName,
-                                                        upstreamJson
-                                                ),
-                                                throwable
-                                        );
-                                    } catch (InvalidProtocolBufferException e) {
-                                        throw new RuntimeException(e);
-                                    } finally {
-                                        consumer.nack(); // force re-delivery
-                                    }
+                                    LOG.error(
+                                            String.format("Failed to publish message downstream. Upstream subscription must wait for deadline before message is eligible for re-delivery.%s%n  downstream-topic: %s%n  upstream-topic: '%s'%n  upstream-subscription: '%s'%n  upstream-payload:%n%s%n",
+                                                    publisher.getTopicName(),
+                                                    topic,
+                                                    subscription,
+                                                    upstreamJson
+                                            ),
+                                            throwable
+                                    );
                                 }
                             },
                             MoreExecutors.directExecutor()
                     );
                 }
             } catch (RuntimeException | Error e) {
-                LOG.error("Sending nack on message to force re-delivery", e);
-                consumer.nack();
-                throw e;
+                LOG.error("Error while processing message, upstream subscription must wait for deadline before message is eligible for re-delivery", e);
             } catch (IOException e) {
-                LOG.error("Sending nack on message to force re-delivery", e);
-                consumer.nack();
-                throw new RuntimeException(e);
+                LOG.error("Error while processing message, upstream subscription must wait for deadline before message is eligible for re-delivery", e);
             }
         }
+    }
+
+    public CompletableFuture<MetadataRouter> shutdown() {
+        CompletableFuture<MetadataRouter> future = CompletableFuture.supplyAsync(() -> {
+            try {
+                for (Subscriber subscriber : subscribers) {
+                    subscriber.stopAsync();
+                }
+                for (Subscriber subscriber : subscribers) {
+                    subscriber.awaitTerminated();
+                }
+                for (Publisher publisher : publishers) {
+                    publisher.shutdown();
+                }
+                for (Publisher publisher : publishers) {
+                    while (!publisher.awaitTermination(3, TimeUnit.SECONDS)) {
+                    }
+                }
+                return this;
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        });
+        return future;
     }
 }

@@ -42,6 +42,12 @@ pubsub:
         - projectId: dapla
           topic: file-events-1
           subscription: metadata-distributor-catalog
+          ack-deadline-seconds: 30
+          dlq:
+            projectId: dapla
+            topic: file-events-1-dlq
+            max-redelivery-attempts: 5
+            subscription: file-events-1-dlq-errors
       downstream:
         - projectId: dapla
           topic: catalog-1

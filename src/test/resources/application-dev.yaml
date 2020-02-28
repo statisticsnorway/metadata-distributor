@@ -13,27 +13,20 @@ pubsub:
     host: localhost
     port: 8538
   credential-provider: emulator
-  credentials:
-    service-account:
-      path: secret/my-service-account-key.json
-    compute-engine:
-    emulator:
-    default:
   metadata-routing:
     - upstream:
         - projectId: dapla
           topic: file-events-1
           subscription: metadata-distributor-catalog
+          ack-deadline-seconds: 3
+          dlq:
+            projectId: dapla
+            topic: file-events-1-dlq
+            max-redelivery-attempts: 2
+            subscription: file-events-1-dlq-errors
       downstream:
         - projectId: dapla
           topic: catalog-1
-    - upstream:
-        - projectId: dapla
-          topic: file-events-1
-          subscription: metadata-distributor-lineage
-      downstream:
-        - projectId: dapla
-          topic: lineage
 
 cloud-storage:
   enabled: false

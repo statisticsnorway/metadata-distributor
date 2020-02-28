@@ -19,7 +19,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -45,7 +44,10 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
         try {
             String projectId = request.getProjectId();
             String topicName = request.getTopicName();
-            Publisher publisher = publisherByProjectTopicName.computeIfAbsent(ProjectTopicName.of(projectId, topicName), pubSub::getPublisher);
+            Publisher publisher = publisherByProjectTopicName.computeIfAbsent(ProjectTopicName.of(projectId, topicName), ptn -> {
+                LOG.info("Creating publisher on topic: {}", ptn.toString());
+                return pubSub.getPublisher(projectId, topicName);
+            });
             PubsubMessage message = PubsubMessage.newBuilder().setData(request.toByteString()).build();
             ApiFuture<String> publishResponseFuture = publisher.publish(message); // async
             ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
@@ -53,8 +55,8 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
                 public void onSuccess(String messageId) {
                     try {
                         restoreTracingContext(tracerAndSpan);
-                        String txId = UUID.randomUUID().toString();
-                        span.log(Map.of("event", "successfully published message", "messageId", messageId, "txId", txId));
+                        String txId = messageId;
+                        span.log(Map.of("event", "successfully published message", "messageId", messageId));
                         responseObserver.onNext(DataChangedResponse.newBuilder().setTxId(txId).build());
                         responseObserver.onCompleted();
                     } finally {

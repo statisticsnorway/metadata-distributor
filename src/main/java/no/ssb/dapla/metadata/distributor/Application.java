@@ -24,6 +24,7 @@ import io.opentracing.Tracer;
 import io.opentracing.contrib.grpc.OperationNameConstructor;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataDistributorGrpcService;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouter;
+import no.ssb.dapla.metadata.distributor.dataset.MetadataRouterTopicAndSubscriptionInitialization;
 import no.ssb.dapla.metadata.distributor.health.Health;
 import no.ssb.dapla.metadata.distributor.health.ReadinessSample;
 import no.ssb.helidon.application.AuthorizationInterceptor;
@@ -87,11 +88,16 @@ public class Application extends DefaultHelidonApplication {
         Health health = new Health(config, lastReadySample, () -> get(WebServer.class));
 
         PubSub pubSub = createPubSub(config.get("pubsub"));
+        put(PubSub.class, pubSub);
 
         MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(pubSub);
         put(MetadataDistributorGrpcService.class, distributorGrpcService);
 
         Storage storage = createStorage(config.get("cloud-storage"));
+
+        config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
+            MetadataRouterTopicAndSubscriptionInitialization.initializeTopicsAndSubscriptions(routing, pubSub);
+        });
 
         config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
             metadataRouters.add(new MetadataRouter(routing, pubSub, storage));
