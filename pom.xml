@@ -6,7 +6,7 @@
     <parent>
         <groupId>no.ssb.dapla</groupId>
         <artifactId>application</artifactId>
-        <version>10</version>
+        <version>11</version>
         <relativePath/>
     </parent>
 
@@ -52,21 +52,14 @@
         <dependency>
             <groupId>no.ssb.pubsub</groupId>
             <artifactId>google-pubsub-client</artifactId>
-            <version>0.6-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>no.ssb.dapla</groupId>
             <artifactId>dataset-uri</artifactId>
-            <version>0.1</version>
         </dependency>
         <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>no.ssb.helidon</groupId>
-            <artifactId>helidon-application</artifactId>
-            <version>0.2.2</version>
         </dependency>
     </dependencies>
 
