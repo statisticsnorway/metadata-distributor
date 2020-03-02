@@ -16,7 +16,7 @@
     <name>${project.artifactId}</name>
 
     <properties>
-        <exec.mainClass>no.ssb.dapla.metadata.distributor.Application</exec.mainClass>
+        <exec.mainClass>no.ssb.dapla.metadata.distributor.MetadataDistributorApplication</exec.mainClass>
     </properties>
 
     <repositories>

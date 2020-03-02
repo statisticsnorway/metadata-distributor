@@ -8,7 +8,7 @@ import no.ssb.helidon.application.HelidonApplication;
 
 import static java.util.Optional.ofNullable;
 
-public class ApplicationBuilder extends DefaultHelidonApplicationBuilder {
+public class MetadataDistributorApplicationBuilder extends DefaultHelidonApplicationBuilder {
 
     @Override
     public HelidonApplication build() {
@@ -17,6 +17,6 @@ public class ApplicationBuilder extends DefaultHelidonApplicationBuilder {
         TracerBuilder<?> tracerBuilder = TracerBuilder.create(config.get("tracing")).registerGlobal(false);
         Tracer tracer = tracerBuilder.build();
 
-        return new Application(config, tracer);
+        return new MetadataDistributorApplication(config, tracer);
     }
 }

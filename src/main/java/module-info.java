@@ -1,3 +1,5 @@
+import no.ssb.dapla.metadata.distributor.MetadataDistributorApplicationBuilder;
+
 module no.ssb.dapla.metadata.distributor {
     requires org.slf4j;
     requires jul.to.slf4j;
@@ -60,5 +62,5 @@ module no.ssb.dapla.metadata.distributor {
     requires google.cloud.storage;
     requires google.cloud.core;
 
-    provides no.ssb.helidon.application.HelidonApplicationBuilder with no.ssb.dapla.metadata.distributor.ApplicationBuilder;
+    provides no.ssb.helidon.application.HelidonApplicationBuilder with MetadataDistributorApplicationBuilder;
 }

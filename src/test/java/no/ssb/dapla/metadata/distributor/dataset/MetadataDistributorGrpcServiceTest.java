@@ -15,7 +15,7 @@ import io.grpc.Channel;
 import no.ssb.dapla.dataset.api.DatasetId;
 import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.dataset.api.PseudoConfig;
-import no.ssb.dapla.metadata.distributor.Application;
+import no.ssb.dapla.metadata.distributor.MetadataDistributorApplication;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
 import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc;
@@ -45,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MetadataDistributorGrpcServiceTest {
 
     @Inject
-    Application application;
+    MetadataDistributorApplication application;
 
     @Inject
     Channel channel;
