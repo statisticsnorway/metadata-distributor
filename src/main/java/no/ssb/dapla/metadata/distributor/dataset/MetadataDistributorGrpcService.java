@@ -31,10 +31,12 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
     private static final Logger LOG = LoggerFactory.getLogger(MetadataDistributorGrpcService.class);
 
     final PubSub pubSub;
+    private final MetadataSignatureVerifier metadataSignatureVerifier;
     final Map<ProjectTopicName, Publisher> publisherByProjectTopicName = new ConcurrentHashMap<>();
 
-    public MetadataDistributorGrpcService(PubSub pubSub) {
+    public MetadataDistributorGrpcService(PubSub pubSub, MetadataSignatureVerifier metadataSignatureVerifier) {
         this.pubSub = pubSub;
+        this.metadataSignatureVerifier = metadataSignatureVerifier;
     }
 
     @Override

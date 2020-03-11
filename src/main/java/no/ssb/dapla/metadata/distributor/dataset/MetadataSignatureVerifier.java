@@ -11,15 +11,14 @@ public class MetadataSignatureVerifier {
 
     final Signature signature;
 
-    public MetadataSignatureVerifier() {
+    public MetadataSignatureVerifier(String keystoreFormat, String keystorePath, String keyAlias, char[] password, String algorithm) {
         try {
-            char[] password = new char[]{'c', 'h', 'a', 'n', 'g', 'e', 'i', 't'};
-            KeyStore keyStore = KeyStore.getInstance("PKCS12");
-            keyStore.load(new FileInputStream("secret/metadata-verifier_keystore.p12"), password);
-            Certificate certificate = keyStore.getCertificate("dataAccessCertificate");
+            KeyStore keyStore = KeyStore.getInstance(keystoreFormat);
+            keyStore.load(new FileInputStream(keystorePath), password);
+            Certificate certificate = keyStore.getCertificate(keyAlias);
             PublicKey publicKey = certificate.getPublicKey();
 
-            signature = Signature.getInstance("SHA256withRSA");
+            signature = Signature.getInstance(algorithm);
             signature.initVerify(publicKey);
         } catch (Error | RuntimeException e) {
             throw e;

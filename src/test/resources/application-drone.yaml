@@ -24,3 +24,10 @@ pubsub:
 
 cloud-storage:
   enabled: false
+
+metadatads:
+  format: PKCS12
+  keystore: src/test/resources/metadata-verifier_keystore.p12
+  keyAlias: dataAccessCertificate
+  password: changeit
+  algorithm: SHA256withRSA
