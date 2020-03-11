@@ -13,7 +13,6 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.PubsubMessage;
 import io.helidon.config.Config;
-import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.dataset.uri.DatasetUri;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
@@ -22,7 +21,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -39,10 +37,12 @@ public class MetadataRouter {
     final Storage storage;
     final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
     final List<Publisher> publishers = new CopyOnWriteArrayList<>();
+    final MetadataSignatureVerifier metadataSignatureVerifier;
 
-    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage) {
+    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier) {
         this.pubSub = pubSub;
         this.storage = storage;
+        this.metadataSignatureVerifier = metadataSignatureVerifier;
 
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
@@ -76,30 +76,41 @@ public class MetadataRouter {
         }
     }
 
-    DatasetMeta resolveAndReadDatasetMeta(DataChangedRequest request) throws IOException {
-        String datasetMetaJson;
-        DatasetUri datasetUri = DatasetUri.of(request.getParentUri(), request.getPath(), request.getVersion());
-        String localPath = datasetUri.toURI().getPath() + "/" + request.getFilename();
+    MetadataReadAndVerifyResult resolveAndReadDatasetMeta(DatasetUri datasetUri) throws IOException {
+        byte[] datasetMetaBytes;
+        byte[] datasetMetaSignatureBytes;
+        String datasetMetaJsonPath = datasetUri.toURI().getPath() + "/.dataset-meta.json";
+        String datasetMetaJsonSignaturePath = datasetUri.toURI().getPath() + "/.dataset-meta.json.sign";
         String scheme = datasetUri.toURI().getScheme();
         switch (scheme) {
             case "file":
-                Path pathToDatasetMetaJson = Path.of(localPath);
-                datasetMetaJson = Files.readString(pathToDatasetMetaJson, StandardCharsets.UTF_8);
+                datasetMetaBytes = Files.readAllBytes(Path.of(datasetMetaJsonPath));
+                datasetMetaSignatureBytes = Files.readAllBytes(Path.of(datasetMetaJsonSignaturePath));
                 break;
             case "gs":
                 String bucket = datasetUri.toURI().getHost();
-                byte[] datasetMetaBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(localPath)));
-                datasetMetaJson = new String(datasetMetaBytes, StandardCharsets.UTF_8);
+                datasetMetaBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(datasetMetaJsonPath)));
+                datasetMetaSignatureBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(datasetMetaJsonSignaturePath)));
                 break;
             default:
                 throw new RuntimeException("Scheme not supported. scheme='" + scheme + "'");
         }
-        DatasetMeta datasetMeta = ProtobufJsonUtils.toPojo(datasetMetaJson, DatasetMeta.class);
-        return datasetMeta;
+        boolean verified = metadataSignatureVerifier.verify(datasetMetaBytes, datasetMetaSignatureBytes);
+        return new MetadataReadAndVerifyResult(false, ByteString.copyFrom(datasetMetaBytes));
     }
 
     private static String stripLeadingSlashes(String input) {
         return input.startsWith("/") ? stripLeadingSlashes(input.substring(1)) : input;
+    }
+
+    static class MetadataReadAndVerifyResult {
+        final boolean signatureValid;
+        final ByteString datasetMetaByteString;
+
+        MetadataReadAndVerifyResult(boolean signatureValid, ByteString datasetMetaByteString) {
+            this.signatureValid = signatureValid;
+            this.datasetMetaByteString = datasetMetaByteString;
+        }
     }
 
     class DataChangedReceiver implements MessageReceiver {
@@ -122,7 +133,7 @@ public class MetadataRouter {
 
                 String upstreamJson = ProtobufJsonUtils.toString(request);
 
-                if (!".dataset-meta.json".equals(request.getFilename())) {
+                if (!".dataset-meta.json.sign".equals(request.getFilename())) {
                     consumer.ack();
                     LOG.debug("Ignored DataChangedRequest message: {}", upstreamJson);
                     return;
@@ -130,11 +141,17 @@ public class MetadataRouter {
 
                 LOG.debug(String.format("processing DataChangedRequest message%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n", topic, subscription, upstreamJson));
 
-                DatasetMeta datasetMeta = resolveAndReadDatasetMeta(request);
-                ByteString datasetMetaByteString = datasetMeta.toByteString();
+                DatasetUri datasetUri = DatasetUri.of(request.getParentUri(), request.getPath(), request.getVersion());
+
+                MetadataReadAndVerifyResult metadataReadAndVerifyResult = resolveAndReadDatasetMeta(datasetUri);
+                if (!metadataReadAndVerifyResult.signatureValid) {
+                    LOG.warn("Invalid signature for metadata of dataset: {}", datasetUri.toString());
+                    consumer.ack();
+                    return;
+                }
 
                 for (Publisher publisher : publishers) {
-                    PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(datasetMetaByteString).build();
+                    PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(metadataReadAndVerifyResult.datasetMetaByteString).build();
                     ApiFuture<String> publishResponseFuture = publisher.publish(downstreamMessage);
                     ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
                                 @Override

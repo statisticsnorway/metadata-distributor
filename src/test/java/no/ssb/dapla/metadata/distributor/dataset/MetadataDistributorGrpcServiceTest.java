@@ -5,6 +5,7 @@ import com.google.cloud.pubsub.v1.TopicAdminClient;
 import com.google.cloud.pubsub.v1.stub.GrpcSubscriberStub;
 import com.google.cloud.pubsub.v1.stub.SubscriberStub;
 import com.google.cloud.pubsub.v1.stub.SubscriberStubSettings;
+import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.AcknowledgeRequest;
 import com.google.pubsub.v1.ProjectSubscriptionName;
 import com.google.pubsub.v1.PubsubMessage;
@@ -52,6 +53,9 @@ class MetadataDistributorGrpcServiceTest {
 
     @Test
     void thatThisWorks() throws IOException {
+        MetadataSigner metadataSigner = new MetadataSigner("PKCS12", "src/test/resources/metadata-signer_keystore.p12",
+                "dataAccessKeyPair", "changeit".toCharArray(), "SHA256withRSA");
+
         initTopicAndSubscription("dapla", "file-events-1", "junit");
 
         MetadataDistributorServiceBlockingStub distributor = MetadataDistributorServiceGrpc.newBlockingStub(channel);
@@ -79,6 +83,26 @@ class MetadataDistributorGrpcServiceTest {
             assertThat(response.getTxId()).isNotNull();
 
             messageIds.add(response.getTxId());
+
+            ByteString validMetadataJson = ByteString.copyFromUtf8(ProtobufJsonUtils.toString(datasetMeta));
+            byte[] signature = metadataSigner.sign(validMetadataJson.toByteArray());
+
+            writeSignatureFile(datasetMeta, signature);
+
+            DataChangedRequest signatureRequest = DataChangedRequest.newBuilder()
+                    .setProjectId("dapla")
+                    .setTopicName("file-events-1")
+                    .setParentUri(datasetMeta.getParentUri())
+                    .setPath(datasetMeta.getId().getPath())
+                    .setVersion(datasetMeta.getId().getVersion())
+                    .setFilename(".dataset-meta.json.sign")
+                    .build();
+
+            DataChangedResponse signatureResponse = distributor.dataChanged(signatureRequest);
+
+            assertThat(signatureResponse.getTxId()).isNotNull();
+
+            messageIds.add(signatureResponse.getTxId());
         }
 
         try (SubscriberStub subscriber = getSubscriberStub()) {
@@ -165,5 +189,12 @@ class MetadataDistributorGrpcServiceTest {
         String datasetMetaJson = ProtobufJsonUtils.toString(datasetMeta);
         Files.writeString(datasetMetaJsonPath, datasetMetaJson, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
+    }
+
+    private void writeSignatureFile(DatasetMeta datasetMeta, byte[] signature) throws IOException {
+        String dataFolder = datasetMeta.getParentUri().substring("file:".length());
+        Path datasetMetaJsonPath = Path.of(dataFolder + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign");
+        Files.createDirectories(datasetMetaJsonPath.getParent());
+        Files.write(datasetMetaJsonPath, signature, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
     }
 }

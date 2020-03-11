@@ -25,6 +25,7 @@ import io.opentracing.contrib.grpc.OperationNameConstructor;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataDistributorGrpcService;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouter;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouterTopicAndSubscriptionInitialization;
+import no.ssb.dapla.metadata.distributor.dataset.MetadataSignatureVerifier;
 import no.ssb.dapla.metadata.distributor.health.Health;
 import no.ssb.dapla.metadata.distributor.health.ReadinessSample;
 import no.ssb.helidon.application.AuthorizationInterceptor;
@@ -90,6 +91,15 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
         PubSub pubSub = createPubSub(config.get("pubsub"));
         put(PubSub.class, pubSub);
 
+        Config signerConfig = config.get("metadatads");
+        String keystoreFormat = signerConfig.get("format").asString().get();
+        String keystore = signerConfig.get("keystore").asString().get();
+        String keyAlias = signerConfig.get("keyAlias").asString().get();
+        char[] password = signerConfig.get("password").asString().get().toCharArray();
+        String algorithm = signerConfig.get("algorithm").asString().get();
+        MetadataSignatureVerifier metadataSignatureVerifier = new MetadataSignatureVerifier(keystoreFormat, keystore, keyAlias, password, algorithm);
+        put(MetadataSignatureVerifier.class, metadataSignatureVerifier);
+
         MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(pubSub);
         put(MetadataDistributorGrpcService.class, distributorGrpcService);
 
@@ -100,7 +110,7 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
         });
 
         config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
-            metadataRouters.add(new MetadataRouter(routing, pubSub, storage));
+            metadataRouters.add(new MetadataRouter(routing, pubSub, storage, metadataSignatureVerifier));
         });
 
         GrpcServer grpcServer = GrpcServer.create(
