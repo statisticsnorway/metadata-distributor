@@ -96,7 +96,7 @@ public class MetadataRouter {
                 throw new RuntimeException("Scheme not supported. scheme='" + scheme + "'");
         }
         boolean verified = metadataSignatureVerifier.verify(datasetMetaBytes, datasetMetaSignatureBytes);
-        return new MetadataReadAndVerifyResult(false, ByteString.copyFrom(datasetMetaBytes));
+        return new MetadataReadAndVerifyResult(verified, ByteString.copyFrom(datasetMetaBytes));
     }
 
     private static String stripLeadingSlashes(String input) {
