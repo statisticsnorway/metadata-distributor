@@ -100,7 +100,7 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
         MetadataSignatureVerifier metadataSignatureVerifier = new MetadataSignatureVerifier(keystoreFormat, keystore, keyAlias, password, algorithm);
         put(MetadataSignatureVerifier.class, metadataSignatureVerifier);
 
-        MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(pubSub, metadataSignatureVerifier);
+        MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(pubSub);
         put(MetadataDistributorGrpcService.class, distributorGrpcService);
 
         Storage storage = createStorage(config.get("cloud-storage"));
@@ -110,7 +110,7 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
         });
 
         config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
-            metadataRouters.add(new MetadataRouter(routing, pubSub, storage));
+            metadataRouters.add(new MetadataRouter(routing, pubSub, storage, metadataSignatureVerifier));
         });
 
         GrpcServer grpcServer = GrpcServer.create(
