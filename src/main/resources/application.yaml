@@ -37,6 +37,7 @@ pubsub:
     compute-engine:
     emulator:
     default:
+  admin: true
   metadata-routing:
     - upstream:
         - projectId: dapla

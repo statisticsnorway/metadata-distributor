@@ -44,7 +44,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -105,9 +104,11 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
 
         Storage storage = createStorage(config.get("cloud-storage"));
 
-        config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
-            MetadataRouterTopicAndSubscriptionInitialization.initializeTopicsAndSubscriptions(routing, pubSub);
-        });
+        if (config.get("pubsub.admin").asBoolean().orElse(false)) {
+            config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
+                MetadataRouterTopicAndSubscriptionInitialization.initializeTopicsAndSubscriptions(routing, pubSub);
+            });
+        }
 
         config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
             metadataRouters.add(new MetadataRouter(routing, pubSub, storage, metadataSignatureVerifier));
@@ -197,11 +198,11 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
             LOG.info("Cloud Storage running with the service-account google credentials provider");
             String serviceAccountKeyPath = config.get("credentials.service-account.path").asString().orElse(null);
             credentials = createWithServiceAccountKeyCredentials(serviceAccountKeyPath)
-                    .createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_write"));
+                    .createScoped(List.of("https://www.googleapis.com/auth/devstorage.read_write"));
         } else if ("compute-engine".equalsIgnoreCase(configuredProviderChoice)) {
             LOG.info("Cloud Storage running with the compute-engine google credentials provider");
             credentials = ComputeEngineCredentials.create()
-                    .createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_write"));
+                    .createScoped(List.of("https://www.googleapis.com/auth/devstorage.read_write"));
         }
         Storage storage = StorageOptions.newBuilder().setCredentials(credentials).build().getService();
         return storage;
