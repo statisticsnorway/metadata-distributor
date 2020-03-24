@@ -1,6 +1,10 @@
 kind: pipeline
 name: default
 
+trigger:
+  ref:
+    - refs/heads/master
+
 steps:
 
   # Restore the cache if it exists
@@ -50,7 +54,7 @@ steps:
     depends_on:
       - build
 
-  - name: publish-docker
+  - name: publish-docker-image
     image: plugins/gcr
     settings:
       repo: prod-bip/metadata-distributor
@@ -58,11 +62,6 @@ steps:
       tags: "${DRONE_BRANCH}-${DRONE_COMMIT_SHA:0:8}"
       json_key:
         from_secret: gcr_credentials
-    when:
-      branch:
-        - master
-      event:
-        - push
     depends_on:
       - build
 
@@ -76,7 +75,7 @@ steps:
       status: [ success, failure ]
     depends_on:
       - sonarqube
-      - publish-docker
+      - publish-docker-image
 
   # Rebuild cache if it has changed with this build
   - name: rebuild-cache
@@ -112,6 +111,66 @@ services:
       - 8538
 
 ---
+
+# Production promotion pipeline
+kind: pipeline
+name: tag-production-image
+type: docker
+
+# When a semver tag is pushed
+trigger:
+  ref:
+    - refs/tags/*[0-9].*[0-9].*[0-9]
+
+steps:
+  - name: tag-docker-image
+    image: docker
+    volumes:
+      - name: dockersock # Needed to communicate with docker daemon on host
+        path: /var/run/docker.sock
+    commands:
+      - echo $JSON_KEY | docker login -u _json_key --password-stdin https://eu.gcr.io
+      # Pull the image
+      - docker pull "eu.gcr.io/prod-bip/metadata-distributor:master-${DRONE_COMMIT_SHA:0:8}"
+      # Tag the image with the git tag ($DRONE_TAG)
+      - docker tag "eu.gcr.io/prod-bip/metadata-distributor:master-${DRONE_COMMIT_SHA:0:8}" "eu.gcr.io/prod-bip/metadata-distributor:${DRONE_TAG}"
+      - docker push "eu.gcr.io/prod-bip/metadata-distributor:${DRONE_TAG}"
+    environment:
+      JSON_KEY:
+        from_secret: gcr_credentials
+
+  - name: slack-image-tag
+    image: plugins/slack
+    settings:
+      webhook:
+        from_secret: slack_webhook_url
+      channel: bip-ci-test
+      template: >
+        {{#success build.status}}:white_check_mark:{{ else }}:x:{{/success}}
+        *{{ uppercasefirst build.status }}: Build #{{ build.number }}* (type: `{{build.event}}`)
+
+        Tagging Docker image with {{ build.tag }} to promote commit {{ build.commit }} (with tag {{ build.tag }}).
+
+        Commit: <https://github.com/{{ repo.owner }}/{{ repo.name }}/commit/{{ build.commit }}|{{ truncate build.commit 8 }}>
+
+        Branch: <https://github.com/{{ repo.owner }}/{{ repo.name }}/commits/{{ build.branch }}|{{ build.branch }}>
+
+        Author: {{ build.author }}
+
+        <{{ build.link }}|{{ build.link }}>
+    when:
+      status: [ success, failure ]
+    depends_on:
+      - tag-docker-image
+
+# Socket used by the 'tag-docker-image' step to communicate with the docker daemon.
+volumes:
+  - name: dockersock
+    host:
+      path: /var/run/docker.sock
+
+---
+
 kind: secret
 name: maven_servers
 get:
