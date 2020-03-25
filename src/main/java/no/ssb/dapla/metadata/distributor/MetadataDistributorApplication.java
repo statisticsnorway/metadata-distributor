@@ -22,6 +22,7 @@ import io.helidon.webserver.WebTracingConfig;
 import io.helidon.webserver.accesslog.AccessLogSupport;
 import io.opentracing.Tracer;
 import io.opentracing.contrib.grpc.OperationNameConstructor;
+import no.ssb.dapla.metadata.distributor.dataset.DefaultMetadataSignatureVerifier;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataDistributorGrpcService;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouter;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouterTopicAndSubscriptionInitialization;
@@ -90,13 +91,18 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
         PubSub pubSub = createPubSub(config.get("pubsub"));
         put(PubSub.class, pubSub);
 
+        MetadataSignatureVerifier metadataSignatureVerifier;
         Config signerConfig = config.get("metadatads");
-        String keystoreFormat = signerConfig.get("format").asString().get();
-        String keystore = signerConfig.get("keystore").asString().get();
-        String keyAlias = signerConfig.get("keyAlias").asString().get();
-        char[] password = signerConfig.get("password").asString().get().toCharArray();
-        String algorithm = signerConfig.get("algorithm").asString().get();
-        MetadataSignatureVerifier metadataSignatureVerifier = new MetadataSignatureVerifier(keystoreFormat, keystore, keyAlias, password, algorithm);
+        if (signerConfig.get("bypass-validation").asBoolean().orElse(false)) {
+            metadataSignatureVerifier = (data, receivedSign) -> true; // always accept signature
+        } else {
+            String keystoreFormat = signerConfig.get("format").asString().get();
+            String keystore = signerConfig.get("keystore").asString().get();
+            String keyAlias = signerConfig.get("keyAlias").asString().get();
+            char[] password = signerConfig.get("password").asString().get().toCharArray();
+            String algorithm = signerConfig.get("algorithm").asString().get();
+            metadataSignatureVerifier = new DefaultMetadataSignatureVerifier(keystoreFormat, keystore, keyAlias, password, algorithm);
+        }
         put(MetadataSignatureVerifier.class, metadataSignatureVerifier);
 
         MetadataDistributorGrpcService distributorGrpcService = new MetadataDistributorGrpcService(pubSub);
