@@ -22,10 +22,14 @@ pubsub:
         - projectId: dapla
           topic: catalog-1
 
-cloud-storage:
-  enabled: false
+storage:
+  file-system:
+    path-prefix: /data
+  cloud-storage:
+    enabled: false
 
 metadatads:
+  bypass-validation: false
   format: PKCS12
   keystore: src/test/resources/metadata-verifier_keystore.p12
   keyAlias: dataAccessCertificate
