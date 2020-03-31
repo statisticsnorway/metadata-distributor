@@ -13,6 +13,7 @@ tracing:
   service: metadata-distributor
   sampler-type: const
   sampler-param: 1
+  propagation: b3
   protocol: http
   host: localhost
   port: 14268
@@ -22,7 +23,17 @@ tracing:
       enabled: false
     - path: "/metrics"
       enabled: false
+    - path: "/metrics/vendor"
+      enabled: false
+    - path: "/metrics/base"
+      enabled: false
+    - path: "/metrics/application"
+      enabled: false
     - path: "/health"
+      enabled: false
+    - path: "/health/live"
+      enabled: false
+    - path: "/health/ready"
       enabled: false
 
 pubsub:
