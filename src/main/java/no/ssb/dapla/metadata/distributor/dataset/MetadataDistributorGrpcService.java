@@ -1,10 +1,14 @@
 package no.ssb.dapla.metadata.distributor.dataset;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutureCallback;
 import com.google.api.core.ApiFutures;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.common.util.concurrent.MoreExecutors;
+import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.ProjectTopicName;
 import com.google.pubsub.v1.PubsubMessage;
 import io.grpc.stub.StreamObserver;
@@ -18,6 +22,8 @@ import no.ssb.pubsub.PubSub;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,6 +38,7 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
 
     final PubSub pubSub;
     final Map<ProjectTopicName, Publisher> publisherByProjectTopicName = new ConcurrentHashMap<>();
+    final ObjectMapper mapper = new ObjectMapper();
 
     public MetadataDistributorGrpcService(PubSub pubSub) {
         this.pubSub = pubSub;
@@ -48,16 +55,40 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
                 LOG.info("Creating publisher on topic: {}", ptn.toString());
                 return pubSub.getPublisher(projectId, topicName);
             });
-            PubsubMessage message = PubsubMessage.newBuilder().setData(request.toByteString()).build();
+
+            URI uri = new URI(request.getUri());
+
+            ObjectNode dataNode = mapper.createObjectNode();
+            if ("gs".equals(uri.getScheme())) {
+                dataNode.put("kind", "storage#object");
+                dataNode.put("id", uri.getHost() + "/" + uri.getPath());
+                dataNode.put("bucket", uri.getHost());
+                dataNode.put("name", uri.getPath());
+            } else if ("file".equals(uri.getScheme())) {
+                dataNode.put("kind", "filesystem");
+                dataNode.put("id", uri.getPath());
+                dataNode.put("name", uri.getPath());
+            }
+
+            PubsubMessage message = PubsubMessage.newBuilder()
+                    .putAllAttributes(Map.of(
+                            "eventType", "OBJECT_FINALIZE",
+                            "payloadFormat", "DAPLA_JSON_API_V1",
+                            "bucketId", uri.getHost(),
+                            "objectId", uri.getPath()
+                    ))
+                    .setData(ByteString.copyFrom(mapper.writeValueAsBytes(dataNode)))
+                    .build();
+
             ApiFuture<String> publishResponseFuture = publisher.publish(message); // async
+
             ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
                 @Override
                 public void onSuccess(String messageId) {
                     try {
                         restoreTracingContext(tracerAndSpan);
-                        String txId = messageId;
                         span.log(Map.of("event", "successfully published message", "messageId", messageId));
-                        responseObserver.onNext(DataChangedResponse.newBuilder().setTxId(txId).build());
+                        responseObserver.onNext(DataChangedResponse.newBuilder().setMessageId(messageId).build());
                         responseObserver.onCompleted();
                     } finally {
                         span.finish();
@@ -76,7 +107,7 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
                     }
                 }
             }, MoreExecutors.directExecutor());
-        } catch (RuntimeException | Error e) {
+        } catch (RuntimeException | Error | URISyntaxException | JsonProcessingException e) {
             try {
                 Tracing.logError(span, e);
                 LOG.error("unexpected error", e);

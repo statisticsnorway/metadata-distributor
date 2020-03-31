@@ -1,5 +1,8 @@
 package no.ssb.dapla.metadata.distributor.dataset;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutureCallback;
 import com.google.api.core.ApiFutures;
@@ -14,8 +17,6 @@ import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.PubsubMessage;
 import io.helidon.config.Config;
 import no.ssb.dapla.dataset.uri.DatasetUri;
-import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
-import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.PubSub;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,10 +25,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class MetadataRouter {
 
@@ -38,11 +42,13 @@ public class MetadataRouter {
     final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
     final List<Publisher> publishers = new CopyOnWriteArrayList<>();
     final MetadataSignatureVerifier metadataSignatureVerifier;
+    final String fileSystemPathPrefix;
 
-    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier) {
+    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier, String fileSystemPathPrefix) {
         this.pubSub = pubSub;
         this.storage = storage;
         this.metadataSignatureVerifier = metadataSignatureVerifier;
+        this.fileSystemPathPrefix = fileSystemPathPrefix;
 
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
@@ -56,27 +62,36 @@ public class MetadataRouter {
         }
 
         for (Config upstream : upstreams) {
+            boolean subscribe = upstream.get("subscribe").asBoolean().orElse(true);
             String upstreamProjectId = upstream.get("projectId").asString().get();
             String upstreamTopicName = upstream.get("topic").asString().get();
             String upstreamSubscriptionName = upstream.get("subscription").asString().get();
 
-            MessageReceiver messageReceiver = new DataChangedReceiver(upstreamProjectId, upstreamTopicName, upstreamSubscriptionName);
-            LOG.info("Creating subscriber on subscription: {}", upstreamSubscriptionName);
-            Subscriber subscriber = pubSub.getSubscriber(upstreamProjectId, upstreamSubscriptionName, messageReceiver);
-            subscriber.addListener(
-                    new Subscriber.Listener() {
-                        public void failed(Subscriber.State from, Throwable failure) {
-                            LOG.error(String.format("Error with subscriber on subscription: '%s'", upstreamSubscriptionName), failure);
-                        }
-                    },
-                    MoreExecutors.directExecutor());
-            subscriber.startAsync().awaitRunning();
-            LOG.info("Subscriber is ready to receive messages: {}", upstreamSubscriptionName);
-            subscribers.add(subscriber);
+            if (subscribe) {
+                MessageReceiver messageReceiver = new RouterMessageReceiver(upstreamProjectId, upstreamTopicName, upstreamSubscriptionName);
+                LOG.info("Creating subscriber on subscription: {}", upstreamSubscriptionName);
+                Subscriber subscriber = pubSub.getSubscriber(upstreamProjectId, upstreamSubscriptionName, messageReceiver);
+                subscriber.addListener(
+                        new Subscriber.Listener() {
+                            public void failed(Subscriber.State from, Throwable failure) {
+                                LOG.error(String.format("Error with subscriber on subscription: '%s'", upstreamSubscriptionName), failure);
+                            }
+                        },
+                        MoreExecutors.directExecutor());
+                subscriber.startAsync().awaitRunning();
+                LOG.info("Subscriber is ready to receive messages: {}", upstreamSubscriptionName);
+                subscribers.add(subscriber);
+            } else {
+                LOG.info("SUBSCRIPTION DISABLED: {}", upstreamSubscriptionName);
+            }
         }
     }
 
-    MetadataReadAndVerifyResult resolveAndReadDatasetMeta(DatasetUri datasetUri) throws IOException {
+    static MetadataReadAndVerifyResult resolveAndReadDatasetMeta(
+            Storage storage,
+            MetadataSignatureVerifier metadataSignatureVerifier,
+            DatasetUri datasetUri
+    ) throws IOException {
         byte[] datasetMetaBytes;
         byte[] datasetMetaSignatureBytes;
         String datasetMetaJsonPath = datasetUri.toURI().getPath() + "/.dataset-meta.json";
@@ -104,6 +119,7 @@ public class MetadataRouter {
     }
 
     static class MetadataReadAndVerifyResult {
+
         final boolean signatureValid;
         final ByteString datasetMetaByteString;
 
@@ -111,15 +127,18 @@ public class MetadataRouter {
             this.signatureValid = signatureValid;
             this.datasetMetaByteString = datasetMetaByteString;
         }
+
     }
 
-    class DataChangedReceiver implements MessageReceiver {
+    static final ObjectMapper objectMapper = new ObjectMapper();
+
+    class RouterMessageReceiver implements MessageReceiver {
 
         final String projectId;
         final String topic;
         final String subscription;
 
-        DataChangedReceiver(String projectId, String topic, String subscription) {
+        RouterMessageReceiver(String projectId, String topic, String subscription) {
             this.projectId = projectId;
             this.topic = topic;
             this.subscription = subscription;
@@ -127,61 +146,131 @@ public class MetadataRouter {
 
         @Override
         public void receiveMessage(PubsubMessage upstreamMessage, AckReplyConsumer consumer) {
-            try {
-                DataChangedRequest request = DataChangedRequest.parseFrom(upstreamMessage.getData());
-                AtomicInteger succeeded = new AtomicInteger(0);
+            process(storage, metadataSignatureVerifier, publishers, topic, subscription, upstreamMessage, consumer::ack, fileSystemPathPrefix);
+        }
+    }
 
-                String upstreamJson = ProtobufJsonUtils.toString(request);
+    static void process(
+            Storage storage,
+            MetadataSignatureVerifier metadataSignatureVerifier,
+            List<Publisher> publishers,
+            String topic,
+            String subscription,
+            PubsubMessage upstreamMessage,
+            Runnable ack,
+            String fileSystemPathPrefix
+    ) {
+        try {
+            Map<String, String> attributes = upstreamMessage.getAttributesMap();
 
-                if (!".dataset-meta.json.sign".equals(request.getFilename())) {
-                    consumer.ack();
-                    LOG.debug("Ignored DataChangedRequest message: {}", upstreamJson);
-                    return;
-                }
-
-                LOG.debug(String.format("processing DataChangedRequest message%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n", topic, subscription, upstreamJson));
-
-                DatasetUri datasetUri = DatasetUri.of(request.getParentUri(), request.getPath(), request.getVersion());
-
-                MetadataReadAndVerifyResult metadataReadAndVerifyResult = resolveAndReadDatasetMeta(datasetUri);
-                if (!metadataReadAndVerifyResult.signatureValid) {
-                    LOG.warn("Invalid signature for metadata of dataset: {}", datasetUri.toString());
-                    consumer.ack();
-                    return;
-                }
-
-                for (Publisher publisher : publishers) {
-                    PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(metadataReadAndVerifyResult.datasetMetaByteString).build();
-                    ApiFuture<String> publishResponseFuture = publisher.publish(downstreamMessage);
-                    ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
-                                @Override
-                                public void onSuccess(String result) {
-                                    if (succeeded.incrementAndGet() == publishers.size()) {
-                                        consumer.ack();
-                                    }
-                                }
-
-                                @Override
-                                public void onFailure(Throwable throwable) {
-                                    LOG.error(
-                                            String.format("Failed to publish message downstream. Upstream subscription must wait for deadline before message is eligible for re-delivery.%s%n  downstream-topic: %s%n  upstream-topic: '%s'%n  upstream-subscription: '%s'%n  upstream-payload:%n%s%n",
-                                                    publisher.getTopicName(),
-                                                    topic,
-                                                    subscription,
-                                                    upstreamJson
-                                            ),
-                                            throwable
-                                    );
-                                }
-                            },
-                            MoreExecutors.directExecutor()
-                    );
-                }
-            } catch (RuntimeException | Error e) {
-                LOG.error("Error while processing message, upstream subscription must wait for deadline before message is eligible for re-delivery", e);
-            } catch (IOException e) {
-                LOG.error("Error while processing message, upstream subscription must wait for deadline before message is eligible for re-delivery", e);
+            String payloadFormat = attributes.get("payloadFormat");
+            if (!(payloadFormat.equals("JSON_API_V1") || payloadFormat.equals("DAPLA_JSON_API_V1"))) {
+                throw new RuntimeException("Ignoring message. Not a valid payloadFormat");
             }
+
+            String eventType = attributes.get("eventType");
+            if (!"OBJECT_FINALIZE".equals(eventType)) {
+                throw new RuntimeException("Ignoring message. eventType OBJECT_FINALIZE is the only one supported!");
+            }
+
+            JsonNode upstreamJson;
+            try {
+                upstreamJson = objectMapper.readTree(upstreamMessage.getData().toStringUtf8());
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
+
+            String kind = upstreamJson.get("kind").textValue();
+            String name = upstreamJson.get("name").textValue();
+
+            int indexOfLastSlash = name.lastIndexOf("/");
+            if (indexOfLastSlash == -1) {
+                LOG.debug("Ignored message: {}", upstreamJson);
+                ack.run();
+                return;
+            }
+
+            Pattern pattern = Pattern.compile("(?<path>.+)/(?<version>[^/]+)/(?<filename>[^/]+)");
+
+            Matcher m = pattern.matcher(name);
+            if (!m.matches()) {
+                LOG.debug("Ignored message due to name not matching pattern 'name/of/dataset/version/filename', name: {}", name);
+                ack.run();
+                return;
+            }
+
+            String filename = m.group("filename");
+            String path = m.group("path");
+            String version = m.group("version");
+
+            String parentUri;
+            if ("storage#object".equals(kind)) {
+                // String generation = upstreamJson.get("generation").textValue();
+                // String metageneration = upstreamJson.get("metageneration").textValue();
+                String bucket = upstreamJson.get("bucket").textValue();
+                parentUri = "gs://" + bucket;
+            } else if ("filesystem".equals(kind)) {
+                parentUri = "file://" + fileSystemPathPrefix;
+            } else {
+                throw new IllegalArgumentException("Illegal kind: " + kind);
+            }
+
+            if (!".dataset-meta.json.sign".equals(filename)) {
+                LOG.debug("Ignored message with filename: {}", upstreamJson);
+                ack.run();
+                return;
+            }
+
+            LOG.debug(String.format("processing message%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n", topic, subscription, upstreamJson));
+
+            DatasetUri datasetUri = DatasetUri.of(parentUri, path, version);
+
+            MetadataReadAndVerifyResult metadataReadAndVerifyResult = resolveAndReadDatasetMeta(storage, metadataSignatureVerifier, datasetUri);
+            if (!metadataReadAndVerifyResult.signatureValid) {
+                LOG.warn("Invalid signature for metadata of dataset: {}", datasetUri.toString());
+                ack.run();
+                return;
+            }
+
+            final AtomicInteger succeeded = new AtomicInteger(0);
+
+            if (publishers.isEmpty()) {
+                LOG.warn("Message ignored due to no configured downstream publishers!");
+                ack.run();
+                return;
+            }
+
+            for (Publisher publisher : publishers) {
+                PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(metadataReadAndVerifyResult.datasetMetaByteString).build();
+                ApiFuture<String> publishResponseFuture = publisher.publish(downstreamMessage);
+                ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
+                            @Override
+                            public void onSuccess(String result) {
+                                if (succeeded.incrementAndGet() == publishers.size()) {
+                                    ack.run();
+                                }
+                            }
+
+                            @Override
+                            public void onFailure(Throwable throwable) {
+                                LOG.error(
+                                        String.format("Failed to publish message downstream. Upstream subscription must wait for deadline before message is eligible for re-delivery.%s%n  downstream-topic: %s%n  upstream-topic: '%s'%n  upstream-subscription: '%s'%n  upstream-payload:%n%s%n",
+                                                publisher.getTopicName(),
+                                                topic,
+                                                subscription,
+                                                upstreamJson
+                                        ),
+                                        throwable
+                                );
+                            }
+                        },
+                        MoreExecutors.directExecutor()
+                );
+            }
+        } catch (RuntimeException | Error e) {
+            LOG.error("Error while processing message, upstream subscription must wait for deadline before message is eligible for re-delivery", e);
+        } catch (IOException e) {
+            LOG.error("Error while processing message, upstream subscription must wait for deadline before message is eligible for re-delivery", e);
         }
     }
 
@@ -198,7 +287,9 @@ public class MetadataRouter {
                     publisher.shutdown();
                 }
                 for (Publisher publisher : publishers) {
-                    while (!publisher.awaitTermination(3, TimeUnit.SECONDS)) {
+                    if (!publisher.awaitTermination(3, TimeUnit.SECONDS)) {
+                        while (!publisher.awaitTermination(3, TimeUnit.SECONDS)) {
+                        }
                     }
                 }
                 return this;
