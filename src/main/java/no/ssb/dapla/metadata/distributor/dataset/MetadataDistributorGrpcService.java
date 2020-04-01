@@ -58,25 +58,33 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
 
             URI uri = new URI(request.getUri());
 
+            Map<String, String> attributes;
+
             ObjectNode dataNode = mapper.createObjectNode();
             if ("gs".equals(uri.getScheme())) {
+                attributes = Map.of(
+                        "eventType", "OBJECT_FINALIZE",
+                        "payloadFormat", "DAPLA_JSON_API_V1",
+                        "bucketId", uri.getHost(),
+                        "objectId", uri.getPath()
+                );
                 dataNode.put("kind", "storage#object");
-                dataNode.put("id", uri.getHost() + "/" + uri.getPath());
                 dataNode.put("bucket", uri.getHost());
                 dataNode.put("name", uri.getPath());
             } else if ("file".equals(uri.getScheme())) {
+                attributes = Map.of(
+                        "eventType", "OBJECT_FINALIZE",
+                        "payloadFormat", "DAPLA_JSON_API_V1",
+                        "objectId", uri.getPath()
+                );
                 dataNode.put("kind", "filesystem");
-                dataNode.put("id", uri.getPath());
                 dataNode.put("name", uri.getPath());
+            } else {
+                throw new IllegalArgumentException("Invalid uri scheme: " + uri.getScheme());
             }
 
             PubsubMessage message = PubsubMessage.newBuilder()
-                    .putAllAttributes(Map.of(
-                            "eventType", "OBJECT_FINALIZE",
-                            "payloadFormat", "DAPLA_JSON_API_V1",
-                            "bucketId", uri.getHost(),
-                            "objectId", uri.getPath()
-                    ))
+                    .putAllAttributes(attributes)
                     .setData(ByteString.copyFrom(mapper.writeValueAsBytes(dataNode)))
                     .build();
 

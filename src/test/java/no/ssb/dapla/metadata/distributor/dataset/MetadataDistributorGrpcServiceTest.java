@@ -1,5 +1,7 @@
 package no.ssb.dapla.metadata.distributor.dataset;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.cloud.pubsub.v1.SubscriptionAdminClient;
 import com.google.cloud.pubsub.v1.TopicAdminClient;
 import com.google.cloud.pubsub.v1.stub.GrpcSubscriberStub;
@@ -25,6 +27,7 @@ import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.EmulatorPubSub;
 import no.ssb.pubsub.PubSub;
 import no.ssb.pubsub.PubSubAdmin;
+import no.ssb.testing.helidon.ConfigOverride;
 import no.ssb.testing.helidon.IntegrationTestExtension;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -42,6 +45,9 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@ConfigOverride({
+        "pubsub.metadata-routing.0.upstream.0.subscribe", "false",
+})
 @ExtendWith(IntegrationTestExtension.class)
 class MetadataDistributorGrpcServiceTest {
 
@@ -72,17 +78,14 @@ class MetadataDistributorGrpcServiceTest {
             DataChangedRequest request = DataChangedRequest.newBuilder()
                     .setProjectId("dapla")
                     .setTopicName("file-events-1")
-                    .setParentUri(datasetMeta.getParentUri())
-                    .setPath(datasetMeta.getId().getPath())
-                    .setVersion(datasetMeta.getId().getVersion())
-                    .setFilename(".dataset-meta.json")
+                    .setUri(datasetMeta.getParentUri() + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json")
                     .build();
 
             DataChangedResponse response = distributor.dataChanged(request);
 
-            assertThat(response.getTxId()).isNotNull();
+            assertThat(response.getMessageId()).isNotNull();
 
-            messageIds.add(response.getTxId());
+            messageIds.add(response.getMessageId());
 
             ByteString validMetadataJson = ByteString.copyFromUtf8(ProtobufJsonUtils.toString(datasetMeta));
             byte[] signature = metadataSigner.sign(validMetadataJson.toByteArray());
@@ -92,19 +95,17 @@ class MetadataDistributorGrpcServiceTest {
             DataChangedRequest signatureRequest = DataChangedRequest.newBuilder()
                     .setProjectId("dapla")
                     .setTopicName("file-events-1")
-                    .setParentUri(datasetMeta.getParentUri())
-                    .setPath(datasetMeta.getId().getPath())
-                    .setVersion(datasetMeta.getId().getVersion())
-                    .setFilename(".dataset-meta.json.sign")
+                    .setUri(datasetMeta.getParentUri() + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign")
                     .build();
 
             DataChangedResponse signatureResponse = distributor.dataChanged(signatureRequest);
 
-            assertThat(signatureResponse.getTxId()).isNotNull();
+            assertThat(signatureResponse.getMessageId()).isNotNull();
 
-            messageIds.add(signatureResponse.getTxId());
+            messageIds.add(signatureResponse.getMessageId());
         }
 
+        ObjectMapper mapper = new ObjectMapper();
         try (SubscriberStub subscriber = getSubscriberStub()) {
             String subscriptionName = ProjectSubscriptionName.format("dapla", "junit");
             PullRequest pullRequest = PullRequest.newBuilder()
@@ -119,8 +120,8 @@ class MetadataDistributorGrpcServiceTest {
 
                 for (ReceivedMessage message : pullResponse.getReceivedMessagesList()) {
                     PubsubMessage pubsubMessage = message.getMessage();
-                    DataChangedRequest dataChangedRequest = DataChangedRequest.parseFrom(pubsubMessage.getData());
-                    System.out.format("Received message in junit test: %s%n", ProtobufJsonUtils.toString(dataChangedRequest));
+                    JsonNode node = mapper.readTree(pubsubMessage.getData().toByteArray());
+                    System.out.format("Received message in junit test: %s%n", node.toPrettyString());
                     messageIds.remove(pubsubMessage.getMessageId());
                     ackIds.add(message.getAckId());
                 }
@@ -151,13 +152,14 @@ class MetadataDistributorGrpcServiceTest {
         if (pubSub instanceof EmulatorPubSub) {
             subscriberStubSettings = SubscriberStubSettings.newBuilder()
                     .setTransportChannelProvider(((EmulatorPubSub) pubSub).getChannelProvider())
-                    .setCredentialsProvider(((EmulatorPubSub) pubSub).getCredentialsProvider())
+                    .setCredentialsProvider(pubSub.getCredentialsProvider())
                     .build();
         } else {
             subscriberStubSettings = SubscriberStubSettings.newBuilder()
                     .setTransportChannelProvider(SubscriberStubSettings.defaultGrpcTransportProviderBuilder()
                             .setMaxInboundMessageSize(20 << 20) // 20MB
                             .build())
+                    .setCredentialsProvider(pubSub.getCredentialsProvider())
                     .build();
         }
 

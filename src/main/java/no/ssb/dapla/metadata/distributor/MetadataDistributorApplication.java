@@ -109,7 +109,9 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
         put(MetadataDistributorGrpcService.class, distributorGrpcService);
 
         Storage storage = createStorage(config.get("storage.cloud-storage"));
-        put(Storage.class, storage);
+        if (storage != null) {
+            put(Storage.class, storage);
+        }
 
         if (config.get("pubsub.admin").asBoolean().orElse(false)) {
             config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
@@ -117,9 +119,8 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
             });
         }
 
-        String fileSystemPathPrefix = config.get("storage.file-system.path-prefix").asString().get();
         config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
-            metadataRouters.add(new MetadataRouter(routing, pubSub, storage, metadataSignatureVerifier, fileSystemPathPrefix));
+            metadataRouters.add(new MetadataRouter(routing, pubSub, storage, metadataSignatureVerifier));
         });
 
         GrpcServer grpcServer = GrpcServer.create(

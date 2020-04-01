@@ -82,15 +82,12 @@ public class MetadataRouterGCSEventTest {
         String upstreamSubscriptionName = "md-test-up-gcs";
 
         CountDownLatch latch = new CountDownLatch(2);
-        String fileSystemPathPrefix = System.getenv("user.dir") + "/target/data";
 
         MessageReceiver messageReceiver = (message, consumer) -> {
             try {
                 System.out.printf("message: %s%n", message);
 
-                MetadataRouter.process(storage, metadataSignatureVerifier, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, () -> {
-                    consumer.ack();
-                }, fileSystemPathPrefix);
+                MetadataRouter.process(storage, metadataSignatureVerifier, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, consumer::ack);
 
                 Map<String, String> attributes = message.getAttributesMap();
                 String objectId = attributes.get("objectId");

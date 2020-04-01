@@ -42,13 +42,11 @@ public class MetadataRouter {
     final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
     final List<Publisher> publishers = new CopyOnWriteArrayList<>();
     final MetadataSignatureVerifier metadataSignatureVerifier;
-    final String fileSystemPathPrefix;
 
-    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier, String fileSystemPathPrefix) {
+    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier) {
         this.pubSub = pubSub;
         this.storage = storage;
         this.metadataSignatureVerifier = metadataSignatureVerifier;
-        this.fileSystemPathPrefix = fileSystemPathPrefix;
 
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
@@ -146,7 +144,7 @@ public class MetadataRouter {
 
         @Override
         public void receiveMessage(PubsubMessage upstreamMessage, AckReplyConsumer consumer) {
-            process(storage, metadataSignatureVerifier, publishers, topic, subscription, upstreamMessage, consumer::ack, fileSystemPathPrefix);
+            process(storage, metadataSignatureVerifier, publishers, topic, subscription, upstreamMessage, consumer::ack);
         }
     }
 
@@ -157,8 +155,7 @@ public class MetadataRouter {
             String topic,
             String subscription,
             PubsubMessage upstreamMessage,
-            Runnable ack,
-            String fileSystemPathPrefix
+            Runnable ack
     ) {
         try {
             Map<String, String> attributes = upstreamMessage.getAttributesMap();
@@ -180,15 +177,7 @@ public class MetadataRouter {
                 throw new RuntimeException(e);
             }
 
-            String kind = upstreamJson.get("kind").textValue();
             String name = upstreamJson.get("name").textValue();
-
-            int indexOfLastSlash = name.lastIndexOf("/");
-            if (indexOfLastSlash == -1) {
-                LOG.debug("Ignored message: {}", upstreamJson);
-                ack.run();
-                return;
-            }
 
             Pattern pattern = Pattern.compile("(?<path>.+)/(?<version>[^/]+)/(?<filename>[^/]+)");
 
@@ -203,6 +192,14 @@ public class MetadataRouter {
             String path = m.group("path");
             String version = m.group("version");
 
+            if (!".dataset-meta.json.sign".equals(filename)) {
+                LOG.debug("Ignored message with filename: {}", upstreamJson);
+                ack.run();
+                return;
+            }
+
+            String kind = upstreamJson.get("kind").textValue();
+
             String parentUri;
             if ("storage#object".equals(kind)) {
                 // String generation = upstreamJson.get("generation").textValue();
@@ -210,15 +207,9 @@ public class MetadataRouter {
                 String bucket = upstreamJson.get("bucket").textValue();
                 parentUri = "gs://" + bucket;
             } else if ("filesystem".equals(kind)) {
-                parentUri = "file://" + fileSystemPathPrefix;
+                parentUri = "file://";
             } else {
                 throw new IllegalArgumentException("Illegal kind: " + kind);
-            }
-
-            if (!".dataset-meta.json.sign".equals(filename)) {
-                LOG.debug("Ignored message with filename: {}", upstreamJson);
-                ack.run();
-                return;
             }
 
             LOG.debug(String.format("processing message%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n", topic, subscription, upstreamJson));
