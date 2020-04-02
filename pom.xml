@@ -44,12 +44,12 @@
         <dependency>
             <groupId>no.ssb.dapla</groupId>
             <artifactId>metadata-distributor-protobuf</artifactId>
-            <version>0.2-SNAPSHOT</version>
+            <version>0.2</version>
         </dependency>
         <dependency>
             <groupId>no.ssb.helidon</groupId>
             <artifactId>helidon-application</artifactId>
-            <version>0.4-SNAPSHOT</version>
+            <version>0.3.2</version>
         </dependency>
         <dependency>
             <groupId>com.google.cloud</groupId>
@@ -71,7 +71,7 @@
         <dependency>
             <groupId>no.ssb.helidon</groupId>
             <artifactId>helidon-testing</artifactId>
-            <version>0.5-SNAPSHOT</version>
+            <version>0.5</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
