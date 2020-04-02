@@ -15,7 +15,6 @@ import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.PubSub;
 import no.ssb.testing.helidon.ConfigOverride;
 import no.ssb.testing.helidon.IntegrationTestExtension;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import javax.inject.Inject;
@@ -51,7 +50,7 @@ public class MetadataRouterGCSEventTest {
     @Inject
     MetadataDistributorApplication application;
 
-    @Test
+    //@Test
     public void thatGCSEventCanBeParsed() throws InterruptedException {
         Storage storage = application.get(Storage.class);
         PubSub pubSub = application.get(PubSub.class);
