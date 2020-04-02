@@ -6,9 +6,9 @@ import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class MetadataSignatureVerifierTest {
+class DefaultMetadataSignatureVerifierTest {
 
-    MetadataSignatureVerifier metadataSignatureVerifier = new MetadataSignatureVerifier(
+    MetadataSignatureVerifier metadataSignatureVerifier = new DefaultMetadataSignatureVerifier(
             "PKCS12",
             "src/test/resources/metadata-verifier_keystore.p12",
             "dataAccessCertificate",

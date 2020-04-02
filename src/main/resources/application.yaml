@@ -13,6 +13,7 @@ tracing:
   service: metadata-distributor
   sampler-type: const
   sampler-param: 1
+  propagation: b3
   protocol: http
   host: localhost
   port: 14268
@@ -22,7 +23,17 @@ tracing:
       enabled: false
     - path: "/metrics"
       enabled: false
+    - path: "/metrics/vendor"
+      enabled: false
+    - path: "/metrics/base"
+      enabled: false
+    - path: "/metrics/application"
+      enabled: false
     - path: "/health"
+      enabled: false
+    - path: "/health/live"
+      enabled: false
+    - path: "/health/ready"
       enabled: false
 
 pubsub:
@@ -43,6 +54,7 @@ pubsub:
         - projectId: dapla
           topic: file-events-1
           subscription: metadata-distributor-catalog
+          subscribe: true
           ack-deadline-seconds: 30
           dlq:
             projectId: dapla
@@ -53,16 +65,20 @@ pubsub:
         - projectId: dapla
           topic: catalog-1
 
-cloud-storage:
-  enabled: false
-  credential-provider: service-account
-  credentials:
-    service-account:
-      path: secret/my-service-account-key.json
-    compute-engine:
-    default:
+storage:
+  file-system:
+    path-prefix: /data
+  cloud-storage:
+    enabled: false
+    credential-provider: service-account
+    credentials:
+      service-account:
+        path: secret/my-service-account-key.json
+      compute-engine:
+      default:
 
 metadatads:
+  bypass-validation: false
   format: PKCS12
   keystore: secret/metadata-verifier_keystore.p12
   keyAlias: dataAccessCertificate
