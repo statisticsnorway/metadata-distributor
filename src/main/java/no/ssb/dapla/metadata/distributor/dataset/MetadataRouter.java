@@ -16,7 +16,9 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.PubsubMessage;
 import io.helidon.config.Config;
+import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.dataset.uri.DatasetUri;
+import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.PubSub;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -200,21 +202,21 @@ public class MetadataRouter {
 
             String kind = upstreamJson.get("kind").textValue();
 
-            String parentUri;
+            String schemeAndAuthority;
             if ("storage#object".equals(kind)) {
                 // String generation = upstreamJson.get("generation").textValue();
                 // String metageneration = upstreamJson.get("metageneration").textValue();
                 String bucket = upstreamJson.get("bucket").textValue();
-                parentUri = "gs://" + bucket;
+                schemeAndAuthority = "gs://" + bucket;
             } else if ("filesystem".equals(kind)) {
-                parentUri = "file://";
+                schemeAndAuthority = "file://";
             } else {
                 throw new IllegalArgumentException("Illegal kind: " + kind);
             }
 
             LOG.debug(String.format("processing message%n  topic:        '%s'%n  subscription: '%s'%n  payload:%n%s%n", topic, subscription, upstreamJson));
 
-            DatasetUri datasetUri = DatasetUri.of(parentUri, path, version);
+            DatasetUri datasetUri = DatasetUri.of(schemeAndAuthority, path, version);
 
             MetadataReadAndVerifyResult metadataReadAndVerifyResult = resolveAndReadDatasetMeta(storage, metadataSignatureVerifier, datasetUri);
             if (!metadataReadAndVerifyResult.signatureValid) {
@@ -231,8 +233,19 @@ public class MetadataRouter {
                 return;
             }
 
+            DatasetMeta datasetMeta = ProtobufJsonUtils.toPojo(metadataReadAndVerifyResult.datasetMetaByteString.toStringUtf8(), DatasetMeta.class);
+            if (!name.endsWith(datasetMeta.getId().getPath() + "/" + version + "/.dataset-meta.json.sign")) {
+                LOG.error("Path validation failed! 'name' does not end with dataset-uri from metadata");
+                ack.run();
+                return;
+            }
+            String parentUri = schemeAndAuthority + name.substring(0, name.lastIndexOf(datasetMeta.getId().getPath()));
+
             for (Publisher publisher : publishers) {
-                PubsubMessage downstreamMessage = PubsubMessage.newBuilder().setData(metadataReadAndVerifyResult.datasetMetaByteString).build();
+                PubsubMessage downstreamMessage = PubsubMessage.newBuilder()
+                        .putAttributes("parentUri", parentUri)
+                        .setData(metadataReadAndVerifyResult.datasetMetaByteString)
+                        .build();
                 ApiFuture<String> publishResponseFuture = publisher.publish(downstreamMessage);
                 ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {
                             @Override
@@ -258,9 +271,7 @@ public class MetadataRouter {
                         MoreExecutors.directExecutor()
                 );
             }
-        } catch (RuntimeException | Error e) {
-            LOG.error("Error while processing message, upstream subscription must wait for deadline before message is eligible for re-delivery", e);
-        } catch (IOException e) {
+        } catch (RuntimeException | Error | IOException e) {
             LOG.error("Error while processing message, upstream subscription must wait for deadline before message is eligible for re-delivery", e);
         }
     }

@@ -10,7 +10,10 @@ import com.google.protobuf.ByteString;
 import io.grpc.Channel;
 import no.ssb.dapla.dataset.api.DatasetId;
 import no.ssb.dapla.dataset.api.DatasetMeta;
+import no.ssb.dapla.dataset.api.DatasetState;
 import no.ssb.dapla.dataset.api.PseudoConfig;
+import no.ssb.dapla.dataset.api.Type;
+import no.ssb.dapla.dataset.api.Valuation;
 import no.ssb.dapla.metadata.distributor.MetadataDistributorApplication;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
@@ -50,13 +53,13 @@ class FilesystemMetadataPropagationTest {
         MetadataDistributorServiceBlockingStub distributor = MetadataDistributorServiceGrpc.newBlockingStub(channel);
 
         String dataFolder = System.getProperty("user.dir") + "/target/data";
-        DatasetMeta datasetMeta = createDatasetMeta(dataFolder, 0);
-        writeDatasetMetaFile(datasetMeta);
+        DatasetMeta datasetMeta = createDatasetMeta(0);
+        writeDatasetMetaFile(dataFolder, datasetMeta);
         String metadataPath = datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json";
         DataChangedRequest request = DataChangedRequest.newBuilder()
                 .setProjectId("dapla")
                 .setTopicName("file-events-1")
-                .setUri(datasetMeta.getParentUri() + metadataPath)
+                .setUri("file:" + dataFolder + metadataPath)
                 .build();
         DataChangedResponse response = distributor.dataChanged(request);
         assertThat(response.getMessageId()).isNotNull();
@@ -65,12 +68,12 @@ class FilesystemMetadataPropagationTest {
         MetadataSigner metadataSigner = new MetadataSigner("PKCS12", "src/test/resources/metadata-signer_keystore.p12",
                 "dataAccessKeyPair", "changeit".toCharArray(), "SHA256withRSA");
         byte[] signature = metadataSigner.sign(validMetadataJson.toByteArray());
-        writeSignatureFile(datasetMeta, signature);
+        writeSignatureFile(dataFolder, datasetMeta, signature);
         String metadataSignaturePath = datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign";
         DataChangedRequest signatureRequest = DataChangedRequest.newBuilder()
                 .setProjectId("dapla")
                 .setTopicName("file-events-1")
-                .setUri(datasetMeta.getParentUri() + metadataSignaturePath)
+                .setUri("file:" + dataFolder  + metadataSignaturePath)
                 .build();
         DataChangedResponse signatureResponse = distributor.dataChanged(signatureRequest);
         assertThat(signatureResponse.getMessageId()).isNotNull();
@@ -117,26 +120,23 @@ class FilesystemMetadataPropagationTest {
         }
     }
 
-    private DatasetMeta createDatasetMeta(String dataFolder, int i) {
-        String parentUri = "file:" + dataFolder;
+    private DatasetMeta createDatasetMeta(int i) {
         String path = "/path/to/dataset-" + i;
-        long version = System.currentTimeMillis();
+        String version = String.valueOf(System.currentTimeMillis());
         return DatasetMeta.newBuilder()
                 .setId(DatasetId.newBuilder()
                         .setPath(path)
                         .setVersion(version)
                         .build())
-                .setType(DatasetMeta.Type.BOUNDED)
-                .setValuation(DatasetMeta.Valuation.OPEN)
-                .setState(DatasetMeta.DatasetState.INPUT)
-                .setParentUri(parentUri)
+                .setType(Type.BOUNDED)
+                .setValuation(Valuation.OPEN)
+                .setState(DatasetState.INPUT)
                 .setPseudoConfig(PseudoConfig.newBuilder().build())
                 .setCreatedBy("junit")
                 .build();
     }
 
-    private void writeDatasetMetaFile(DatasetMeta datasetMeta) throws IOException {
-        String dataFolder = datasetMeta.getParentUri().substring("file:".length());
+    private void writeDatasetMetaFile(String dataFolder, DatasetMeta datasetMeta) throws IOException {
         Path datasetMetaJsonPath = Path.of(dataFolder + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json");
         Files.createDirectories(datasetMetaJsonPath.getParent());
         String datasetMetaJson = ProtobufJsonUtils.toString(datasetMeta);
@@ -144,8 +144,7 @@ class FilesystemMetadataPropagationTest {
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
     }
 
-    private void writeSignatureFile(DatasetMeta datasetMeta, byte[] signature) throws IOException {
-        String dataFolder = datasetMeta.getParentUri().substring("file:".length());
+    private void writeSignatureFile(String dataFolder, DatasetMeta datasetMeta, byte[] signature) throws IOException {
         Path datasetMetaJsonPath = Path.of(dataFolder + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign");
         Files.createDirectories(datasetMetaJsonPath.getParent());
         Files.write(datasetMetaJsonPath, signature, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
