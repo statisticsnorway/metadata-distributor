@@ -66,8 +66,6 @@ pubsub:
           topic: catalog-1
 
 storage:
-  file-system:
-    path-prefix: /data
   cloud-storage:
     enabled: false
     credential-provider: service-account
