@@ -234,8 +234,8 @@ public class MetadataRouter {
             }
 
             DatasetMeta datasetMeta = ProtobufJsonUtils.toPojo(metadataReadAndVerifyResult.datasetMetaByteString.toStringUtf8(), DatasetMeta.class);
-            if (!name.endsWith(datasetMeta.getId().getPath() + "/" + version + "/.dataset-meta.json.sign")) {
-                LOG.error("Path validation failed! 'name' does not end with dataset-uri from metadata");
+            if (!name.endsWith(datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign")) {
+                LOG.error("Path validation failed! 'name' does not end with dataset-uri matching id.path and id.version from dataset-meta.json");
                 ack.run();
                 return;
             }
