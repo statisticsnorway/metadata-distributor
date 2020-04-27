@@ -99,7 +99,12 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
             String keystoreFormat = signerConfig.get("format").asString().get();
             String keystore = signerConfig.get("keystore").asString().get();
             String keyAlias = signerConfig.get("keyAlias").asString().get();
-            char[] password = signerConfig.get("password").asString().get().toCharArray();
+            char[] password = signerConfig.get("password-file").asString()
+                    .filter(s -> !s.isBlank())
+                    .map(passwordFile -> Path.of(passwordFile))
+                    .filter(Files::exists)
+                    .map(MetadataDistributorApplication::readPasswordFromFile)
+                    .orElseGet(() -> signerConfig.get("password").asString().get().toCharArray());
             String algorithm = signerConfig.get("algorithm").asString().get();
             metadataSignatureVerifier = new DefaultMetadataSignatureVerifier(keystoreFormat, keystore, keyAlias, password, algorithm);
         }
@@ -172,6 +177,14 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
                         .build(),
                 routing);
         put(WebServer.class, webServer);
+    }
+
+    private static char[] readPasswordFromFile(Path passwordPath) {
+        try {
+            return Files.readString(passwordPath).toCharArray();
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     static PubSub createPubSub(Config config) {
