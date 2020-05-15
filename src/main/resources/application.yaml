@@ -58,12 +58,26 @@ pubsub:
           ack-deadline-seconds: 30
           dlq:
             projectId: dapla
-            topic: file-events-1-dlq
+            topic: file-events-1-catalog-dlq
             max-redelivery-attempts: 5
-            subscription: file-events-1-dlq-errors
+            subscription: file-events-1-catalog-dlq-errors
       downstream:
         - projectId: dapla
           topic: catalog-1
+    - upstream:
+        - projectId: dapla
+          topic: file-events-1
+          subscription: metadata-distributor-gsim
+          subscribe: true
+          ack-deadline-seconds: 30
+          dlq:
+            projectId: dapla
+            topic: file-events-1-gsim-dlq
+            max-redelivery-attempts: 5
+            subscription: file-events-1-gsim-dlq-errors
+      downstream:
+        - projectId: dapla
+          topic: gsim-metadata-1
 
 storage:
   cloud-storage:
