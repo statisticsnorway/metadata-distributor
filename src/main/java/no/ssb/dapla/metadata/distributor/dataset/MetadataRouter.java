@@ -3,6 +3,7 @@ package no.ssb.dapla.metadata.distributor.dataset;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutureCallback;
 import com.google.api.core.ApiFutures;
@@ -10,6 +11,7 @@ import com.google.cloud.pubsub.v1.AckReplyConsumer;
 import com.google.cloud.pubsub.v1.MessageReceiver;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.Subscriber;
+import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.Storage;
 import com.google.common.util.concurrent.MoreExecutors;
@@ -24,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -35,6 +38,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static java.util.Optional.ofNullable;
+
 public class MetadataRouter {
 
     private static final Logger LOG = LoggerFactory.getLogger(MetadataRouter.class);
@@ -44,11 +49,13 @@ public class MetadataRouter {
     final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
     final List<Publisher> publishers = new CopyOnWriteArrayList<>();
     final MetadataSignatureVerifier metadataSignatureVerifier;
+    final String fileSystemDataFolder;
 
-    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier) {
+    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier, String fileSystemDataFolder) {
         this.pubSub = pubSub;
         this.storage = storage;
         this.metadataSignatureVerifier = metadataSignatureVerifier;
+        this.fileSystemDataFolder = fileSystemDataFolder;
 
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
@@ -89,29 +96,42 @@ public class MetadataRouter {
 
     static MetadataReadAndVerifyResult resolveAndReadDatasetMeta(
             Storage storage,
+            String fileSystemDataFolder,
             MetadataSignatureVerifier metadataSignatureVerifier,
             DatasetUri datasetUri
     ) throws IOException {
         byte[] datasetMetaBytes;
+        byte[] datasetDocBytes = null;
         byte[] datasetMetaSignatureBytes;
         String datasetMetaJsonPath = datasetUri.toURI().getPath() + "/.dataset-meta.json";
+        String datasetDocJsonPath = datasetUri.toURI().getPath() + "/.dataset-doc.json";
         String datasetMetaJsonSignaturePath = datasetUri.toURI().getPath() + "/.dataset-meta.json.sign";
         String scheme = datasetUri.toURI().getScheme();
         switch (scheme) {
             case "file":
-                datasetMetaBytes = Files.readAllBytes(Path.of(datasetMetaJsonPath));
-                datasetMetaSignatureBytes = Files.readAllBytes(Path.of(datasetMetaJsonSignaturePath));
+                datasetMetaBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonPath));
+                if (Files.isReadable(Path.of(fileSystemDataFolder, datasetDocJsonPath))) {
+                    datasetDocBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetDocJsonPath));
+                }
+                datasetMetaSignatureBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonSignaturePath));
                 break;
             case "gs":
                 String bucket = datasetUri.toURI().getHost();
                 datasetMetaBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(datasetMetaJsonPath)));
+                BlobId datasetDocBlobId = BlobId.of(bucket, stripLeadingSlashes(datasetDocJsonPath));
+                Blob datasetDocBlob = storage.get(datasetDocBlobId);
+                if (datasetDocBlob != null) {
+                    datasetDocBytes = storage.readAllBytes(datasetDocBlobId);
+                }
                 datasetMetaSignatureBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(datasetMetaJsonSignaturePath)));
                 break;
             default:
                 throw new RuntimeException("Scheme not supported. scheme='" + scheme + "'");
         }
         boolean verified = metadataSignatureVerifier.verify(datasetMetaBytes, datasetMetaSignatureBytes);
-        return new MetadataReadAndVerifyResult(verified, ByteString.copyFrom(datasetMetaBytes));
+        return new MetadataReadAndVerifyResult(verified, ByteString.copyFrom(datasetMetaBytes),
+                ofNullable(datasetDocBytes).map(ByteString::copyFrom).orElse(null)
+        );
     }
 
     private static String stripLeadingSlashes(String input) {
@@ -122,10 +142,12 @@ public class MetadataRouter {
 
         final boolean signatureValid;
         final ByteString datasetMetaByteString;
+        final ByteString datasetDocByteString;
 
-        MetadataReadAndVerifyResult(boolean signatureValid, ByteString datasetMetaByteString) {
+        MetadataReadAndVerifyResult(boolean signatureValid, ByteString datasetMetaByteString, ByteString datasetDocByteString) {
             this.signatureValid = signatureValid;
             this.datasetMetaByteString = datasetMetaByteString;
+            this.datasetDocByteString = datasetDocByteString;
         }
 
     }
@@ -146,12 +168,13 @@ public class MetadataRouter {
 
         @Override
         public void receiveMessage(PubsubMessage upstreamMessage, AckReplyConsumer consumer) {
-            process(storage, metadataSignatureVerifier, publishers, topic, subscription, upstreamMessage, consumer::ack);
+            process(storage, fileSystemDataFolder, metadataSignatureVerifier, publishers, topic, subscription, upstreamMessage, consumer::ack);
         }
     }
 
     static void process(
             Storage storage,
+            String fileSystemDataFolder,
             MetadataSignatureVerifier metadataSignatureVerifier,
             List<Publisher> publishers,
             String topic,
@@ -218,7 +241,7 @@ public class MetadataRouter {
 
             DatasetUri datasetUri = DatasetUri.of(schemeAndAuthority, path, version);
 
-            MetadataReadAndVerifyResult metadataReadAndVerifyResult = resolveAndReadDatasetMeta(storage, metadataSignatureVerifier, datasetUri);
+            MetadataReadAndVerifyResult metadataReadAndVerifyResult = resolveAndReadDatasetMeta(storage, fileSystemDataFolder, metadataSignatureVerifier, datasetUri);
             if (!metadataReadAndVerifyResult.signatureValid) {
                 LOG.warn("Invalid signature for metadata of dataset: {}", datasetUri.toString());
                 ack.run();
@@ -241,10 +264,24 @@ public class MetadataRouter {
             }
             String parentUri = schemeAndAuthority + name.substring(0, name.lastIndexOf(datasetMeta.getId().getPath()));
 
+            ObjectNode downstreamMessageDataNode = objectMapper.createObjectNode();
+            downstreamMessageDataNode.put("parentUri", parentUri);
+            try (InputStream inputStream = metadataReadAndVerifyResult.datasetMetaByteString.newInput()) {
+                JsonNode datasetMetaNode = objectMapper.readTree(inputStream);
+                downstreamMessageDataNode.set("dataset-meta", datasetMetaNode);
+            }
+            if (metadataReadAndVerifyResult.datasetDocByteString != null) {
+                try (InputStream inputStream = metadataReadAndVerifyResult.datasetDocByteString.newInput()) {
+                    JsonNode datasetMetaNode = objectMapper.readTree(inputStream);
+                    downstreamMessageDataNode.set("dataset-doc", datasetMetaNode);
+                }
+            }
+            ByteString downstreamMessageData = ByteString.copyFrom(objectMapper.writeValueAsBytes(downstreamMessageDataNode));
+
             for (Publisher publisher : publishers) {
                 PubsubMessage downstreamMessage = PubsubMessage.newBuilder()
                         .putAttributes("parentUri", parentUri)
-                        .setData(metadataReadAndVerifyResult.datasetMetaByteString)
+                        .setData(downstreamMessageData)
                         .build();
                 ApiFuture<String> publishResponseFuture = publisher.publish(downstreamMessage);
                 ApiFutures.addCallback(publishResponseFuture, new ApiFutureCallback<>() {

@@ -125,7 +125,8 @@ public class MetadataDistributorApplication extends DefaultHelidonApplication {
         }
 
         config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
-            metadataRouters.add(new MetadataRouter(routing, pubSub, storage, metadataSignatureVerifier));
+            String fileSystemDataFolder = config.get("storage.file-system.data-folder").asString().orElse("");
+            metadataRouters.add(new MetadataRouter(routing, pubSub, storage, metadataSignatureVerifier, fileSystemDataFolder));
         });
 
         GrpcServer grpcServer = GrpcServer.create(

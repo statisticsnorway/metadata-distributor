@@ -76,26 +76,42 @@ class MetadataDistributorGrpcServiceTest {
         for (int i = 0; i < 2; i++) {
             DatasetMeta datasetMeta = createDatasetMeta(i);
 
-            writeDatasetMetaFile(dataFolder, datasetMeta);
+            writeContentAsUtf8ToFile(dataFolder, datasetMeta, ".dataset-meta.json", ProtobufJsonUtils.toString(datasetMeta));
+            writeContentAsUtf8ToFile(dataFolder, datasetMeta, ".dataset-doc.json", "{}");
 
             String parentUri = "file:" + dataFolder;
 
-            DataChangedRequest request = DataChangedRequest.newBuilder()
-                    .setProjectId("dapla")
-                    .setTopicName("file-events-1")
-                    .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json")
-                    .build();
+            {
+                DataChangedRequest request = DataChangedRequest.newBuilder()
+                        .setProjectId("dapla")
+                        .setTopicName("file-events-1")
+                        .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json")
+                        .build();
 
-            DataChangedResponse response = distributor.dataChanged(request);
+                DataChangedResponse response = distributor.dataChanged(request);
 
-            assertThat(response.getMessageId()).isNotNull();
+                assertThat(response.getMessageId()).isNotNull();
 
-            messageIds.add(response.getMessageId());
+                messageIds.add(response.getMessageId());
+            }
+            {
+                DataChangedRequest request = DataChangedRequest.newBuilder()
+                        .setProjectId("dapla")
+                        .setTopicName("file-events-1")
+                        .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-doc.json")
+                        .build();
+
+                DataChangedResponse response = distributor.dataChanged(request);
+
+                assertThat(response.getMessageId()).isNotNull();
+
+                messageIds.add(response.getMessageId());
+            }
 
             ByteString validMetadataJson = ByteString.copyFromUtf8(ProtobufJsonUtils.toString(datasetMeta));
             byte[] signature = metadataSigner.sign(validMetadataJson.toByteArray());
 
-            writeSignatureFile(dataFolder, datasetMeta, signature);
+            writeContentToFile(dataFolder, datasetMeta, ".dataset-meta.json.sign", signature);
 
             DataChangedRequest signatureRequest = DataChangedRequest.newBuilder()
                     .setProjectId("dapla")
@@ -187,17 +203,16 @@ class MetadataDistributorGrpcServiceTest {
                 .build();
     }
 
-    private void writeDatasetMetaFile(String dataFolder, DatasetMeta datasetMeta) throws IOException {
-        Path datasetMetaJsonPath = Path.of(dataFolder + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json");
-        Files.createDirectories(datasetMetaJsonPath.getParent());
-        String datasetMetaJson = ProtobufJsonUtils.toString(datasetMeta);
-        Files.writeString(datasetMetaJsonPath, datasetMetaJson, StandardCharsets.UTF_8,
+    private void writeContentAsUtf8ToFile(String dataFolder, DatasetMeta datasetMeta, String filename, String content) throws IOException {
+        Path path = Path.of(dataFolder + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/" + filename);
+        Files.createDirectories(path.getParent());
+        Files.writeString(path, content, StandardCharsets.UTF_8,
                 StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
     }
 
-    private void writeSignatureFile(String dataFolder, DatasetMeta datasetMeta, byte[] signature) throws IOException {
-        Path datasetMetaJsonPath = Path.of(dataFolder + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign");
+    private void writeContentToFile(String dataFolder, DatasetMeta datasetMeta, String filename, byte[] content) throws IOException {
+        Path datasetMetaJsonPath = Path.of(dataFolder + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/" + filename);
         Files.createDirectories(datasetMetaJsonPath.getParent());
-        Files.write(datasetMetaJsonPath, signature, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
+        Files.write(datasetMetaJsonPath, content, StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
     }
 }

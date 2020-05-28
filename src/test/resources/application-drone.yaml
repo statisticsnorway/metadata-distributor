@@ -25,6 +25,8 @@ pubsub:
 storage:
   cloud-storage:
     enabled: false
+  file-system:
+    data-folder: ""
 
 metadatads:
   bypass-validation: false

@@ -68,12 +68,14 @@ public class MetadataRouterGCSEventTest {
 
         long version = System.currentTimeMillis();
 
-        System.out.printf("Publishing two files under version folder: %d%n", version);
+        System.out.printf("Publishing three files under version folder: %d%n", version);
 
         String metadataPath = String.format("%s/%d/%s", "md-junit-test", version, ".dataset-meta.json");
+        String datasetDocPath = String.format("%s/%d/%s", "md-junit-test", version, ".dataset-doc.json");
         String metadataSignaturePath = String.format("%s/%d/%s", "md-junit-test", version, ".dataset-meta.json.sign");
 
         storage.create(BlobInfo.newBuilder(BucketInfo.of(bucketName), metadataPath).build(), ProtobufJsonUtils.toString(DatasetMeta.newBuilder().build()).getBytes(StandardCharsets.UTF_8));
+        storage.create(BlobInfo.newBuilder(BucketInfo.of(bucketName), datasetDocPath).build(), "{}".getBytes(StandardCharsets.UTF_8));
         storage.create(BlobInfo.newBuilder(BucketInfo.of(bucketName), metadataSignaturePath).build(), "My Signature".getBytes(StandardCharsets.UTF_8));
 
         String upstreamProjectId = "dev-sirius";
@@ -86,7 +88,7 @@ public class MetadataRouterGCSEventTest {
             try {
                 System.out.printf("message: %s%n", message);
 
-                MetadataRouter.process(storage, metadataSignatureVerifier, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, consumer::ack);
+                MetadataRouter.process(storage, "", metadataSignatureVerifier, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, consumer::ack);
 
                 Map<String, String> attributes = message.getAttributesMap();
                 String objectId = attributes.get("objectId");
