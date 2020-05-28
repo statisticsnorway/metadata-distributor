@@ -49,11 +49,13 @@ public class MetadataRouter {
     final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
     final List<Publisher> publishers = new CopyOnWriteArrayList<>();
     final MetadataSignatureVerifier metadataSignatureVerifier;
+    final String fileSystemDataFolder;
 
-    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier) {
+    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier, String fileSystemDataFolder) {
         this.pubSub = pubSub;
         this.storage = storage;
         this.metadataSignatureVerifier = metadataSignatureVerifier;
+        this.fileSystemDataFolder = fileSystemDataFolder;
 
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
@@ -94,6 +96,7 @@ public class MetadataRouter {
 
     static MetadataReadAndVerifyResult resolveAndReadDatasetMeta(
             Storage storage,
+            String fileSystemDataFolder,
             MetadataSignatureVerifier metadataSignatureVerifier,
             DatasetUri datasetUri
     ) throws IOException {
@@ -106,11 +109,11 @@ public class MetadataRouter {
         String scheme = datasetUri.toURI().getScheme();
         switch (scheme) {
             case "file":
-                datasetMetaBytes = Files.readAllBytes(Path.of(datasetMetaJsonPath));
-                if (Files.isReadable(Path.of(datasetDocJsonPath))) {
-                    datasetDocBytes = Files.readAllBytes(Path.of(datasetDocJsonPath));
+                datasetMetaBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonPath));
+                if (Files.isReadable(Path.of(fileSystemDataFolder, datasetDocJsonPath))) {
+                    datasetDocBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetDocJsonPath));
                 }
-                datasetMetaSignatureBytes = Files.readAllBytes(Path.of(datasetMetaJsonSignaturePath));
+                datasetMetaSignatureBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonSignaturePath));
                 break;
             case "gs":
                 String bucket = datasetUri.toURI().getHost();
@@ -165,12 +168,13 @@ public class MetadataRouter {
 
         @Override
         public void receiveMessage(PubsubMessage upstreamMessage, AckReplyConsumer consumer) {
-            process(storage, metadataSignatureVerifier, publishers, topic, subscription, upstreamMessage, consumer::ack);
+            process(storage, fileSystemDataFolder, metadataSignatureVerifier, publishers, topic, subscription, upstreamMessage, consumer::ack);
         }
     }
 
     static void process(
             Storage storage,
+            String fileSystemDataFolder,
             MetadataSignatureVerifier metadataSignatureVerifier,
             List<Publisher> publishers,
             String topic,
@@ -237,7 +241,7 @@ public class MetadataRouter {
 
             DatasetUri datasetUri = DatasetUri.of(schemeAndAuthority, path, version);
 
-            MetadataReadAndVerifyResult metadataReadAndVerifyResult = resolveAndReadDatasetMeta(storage, metadataSignatureVerifier, datasetUri);
+            MetadataReadAndVerifyResult metadataReadAndVerifyResult = resolveAndReadDatasetMeta(storage, fileSystemDataFolder, metadataSignatureVerifier, datasetUri);
             if (!metadataReadAndVerifyResult.signatureValid) {
                 LOG.warn("Invalid signature for metadata of dataset: {}", datasetUri.toString());
                 ack.run();

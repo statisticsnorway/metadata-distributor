@@ -88,9 +88,11 @@ storage:
         path: secret/my-service-account-key.json
       compute-engine:
       default:
+  file-system:
+    data-folder: ""
 
 metadatads:
-  bypass-validation: false
+  bypass-validation: true
   format: PKCS12
   keystore: secret/metadata-verifier_keystore.p12
   keyAlias: dataAccessCertificate

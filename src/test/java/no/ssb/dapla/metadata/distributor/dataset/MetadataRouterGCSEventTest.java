@@ -88,7 +88,7 @@ public class MetadataRouterGCSEventTest {
             try {
                 System.out.printf("message: %s%n", message);
 
-                MetadataRouter.process(storage, metadataSignatureVerifier, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, consumer::ack);
+                MetadataRouter.process(storage, "", metadataSignatureVerifier, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, consumer::ack);
 
                 Map<String, String> attributes = message.getAttributesMap();
                 String objectId = attributes.get("objectId");

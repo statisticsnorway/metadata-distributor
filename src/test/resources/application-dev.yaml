@@ -37,6 +37,8 @@ storage:
         path: secret/my-gcs-credentials.json
       compute-engine:
       default:
+  file-system:
+    data-folder: ""
 
 metadatads:
   bypass-validation: false
