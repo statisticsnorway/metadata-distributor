@@ -102,9 +102,11 @@ public class MetadataRouter {
     ) throws IOException {
         byte[] datasetMetaBytes;
         byte[] datasetDocBytes = null;
+        byte[] datasetLineageBytes = null;
         byte[] datasetMetaSignatureBytes;
         String datasetMetaJsonPath = datasetUri.toURI().getPath() + "/.dataset-meta.json";
         String datasetDocJsonPath = datasetUri.toURI().getPath() + "/.dataset-doc.json";
+        String datasetLinageJsonPath = datasetUri.toURI().getPath() + "/.dataset-lineage.json";
         String datasetMetaJsonSignaturePath = datasetUri.toURI().getPath() + "/.dataset-meta.json.sign";
         String scheme = datasetUri.toURI().getScheme();
         switch (scheme) {
@@ -112,6 +114,9 @@ public class MetadataRouter {
                 datasetMetaBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonPath));
                 if (Files.isReadable(Path.of(fileSystemDataFolder, datasetDocJsonPath))) {
                     datasetDocBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetDocJsonPath));
+                }
+                if (Files.isReadable(Path.of(fileSystemDataFolder, datasetLinageJsonPath))) {
+                    datasetLineageBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetLinageJsonPath));
                 }
                 datasetMetaSignatureBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonSignaturePath));
                 break;
@@ -123,14 +128,22 @@ public class MetadataRouter {
                 if (datasetDocBlob != null) {
                     datasetDocBytes = storage.readAllBytes(datasetDocBlobId);
                 }
+                BlobId datasetLineageBlobId = BlobId.of(bucket, stripLeadingSlashes(datasetLinageJsonPath));
+                Blob datasetLineageBlob = storage.get(datasetLineageBlobId);
+                if (datasetLineageBlob != null) {
+                    datasetLineageBytes = storage.readAllBytes(datasetLineageBlobId);
+                }
+
                 datasetMetaSignatureBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(datasetMetaJsonSignaturePath)));
                 break;
             default:
                 throw new RuntimeException("Scheme not supported. scheme='" + scheme + "'");
         }
         boolean verified = metadataSignatureVerifier.verify(datasetMetaBytes, datasetMetaSignatureBytes);
-        return new MetadataReadAndVerifyResult(verified, ByteString.copyFrom(datasetMetaBytes),
-                ofNullable(datasetDocBytes).map(ByteString::copyFrom).orElse(null)
+        return new MetadataReadAndVerifyResult(verified,
+                ByteString.copyFrom(datasetMetaBytes),
+                ofNullable(datasetDocBytes).map(ByteString::copyFrom).orElse(null),
+                ofNullable(datasetLineageBytes).map(ByteString::copyFrom).orElse(null)
         );
     }
 
@@ -143,11 +156,16 @@ public class MetadataRouter {
         final boolean signatureValid;
         final ByteString datasetMetaByteString;
         final ByteString datasetDocByteString;
+        final ByteString datasetLineageByteString;
 
-        MetadataReadAndVerifyResult(boolean signatureValid, ByteString datasetMetaByteString, ByteString datasetDocByteString) {
+        MetadataReadAndVerifyResult(boolean signatureValid,
+                                    ByteString datasetMetaByteString,
+                                    ByteString datasetDocByteString,
+                                    ByteString datasetLineageByteString) {
             this.signatureValid = signatureValid;
             this.datasetMetaByteString = datasetMetaByteString;
             this.datasetDocByteString = datasetDocByteString;
+            this.datasetLineageByteString = datasetLineageByteString;
         }
 
     }
@@ -274,6 +292,12 @@ public class MetadataRouter {
                 try (InputStream inputStream = metadataReadAndVerifyResult.datasetDocByteString.newInput()) {
                     JsonNode datasetMetaNode = objectMapper.readTree(inputStream);
                     downstreamMessageDataNode.set("dataset-doc", datasetMetaNode);
+                }
+            }
+            if (metadataReadAndVerifyResult.datasetLineageByteString != null) {
+                try (InputStream inputStream = metadataReadAndVerifyResult.datasetLineageByteString.newInput()) {
+                    JsonNode datasetMetaNode = objectMapper.readTree(inputStream);
+                    downstreamMessageDataNode.set("dataset-lineage", datasetMetaNode);
                 }
             }
             ByteString downstreamMessageData = ByteString.copyFrom(objectMapper.writeValueAsBytes(downstreamMessageDataNode));
