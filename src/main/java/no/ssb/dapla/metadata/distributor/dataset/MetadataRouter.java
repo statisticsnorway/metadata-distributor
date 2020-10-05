@@ -27,6 +27,8 @@ import no.ssb.dapla.metadata.distributor.parquet.ParquetTools;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.PubSub;
 import org.apache.avro.Schema;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -160,7 +162,15 @@ public class MetadataRouter {
     }
 
     private static Schema getAvroSchemaFromLocalFileSystem(DatasetUri datasetUri) {
-        throw new UnsupportedOperationException("Not implemented yet");
+        org.apache.hadoop.fs.Path hadoopPath = new org.apache.hadoop.fs.Path(datasetUri.toURI().getRawPath());
+        HadoopInputFile hadoopInputFile;
+        try {
+            hadoopInputFile = HadoopInputFile.fromPath(hadoopPath, new Configuration());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        Schema schema = ParquetTools.getAvroSchemaFromFile(hadoopInputFile);
+        return schema;
     }
 
     private static Schema getAvroSchemaFromGoogleCloudStorage(Storage storage, DatasetUri datasetUri) {
