@@ -14,16 +14,19 @@ import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.Subscriber;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
-import com.google.cloud.storage.Bucket;
 import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.Storage.BlobListOption;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.PubsubMessage;
 import io.helidon.config.Config;
 import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.dataset.uri.DatasetUri;
+import no.ssb.dapla.metadata.distributor.parquet.GCSReadChannelBasedInputFile;
+import no.ssb.dapla.metadata.distributor.parquet.ParquetTools;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.PubSub;
+import org.apache.avro.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,6 +41,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.StreamSupport;
@@ -113,9 +117,9 @@ public class MetadataRouter {
         String datasetLinageJsonPath = datasetUri.toURI().getPath() + "/.dataset-lineage.json";
         String datasetMetaJsonSignaturePath = datasetUri.toURI().getPath() + "/.dataset-meta.json.sign";
         String scheme = datasetUri.toURI().getScheme();
+        Schema avroSchema;
         switch (scheme) {
             case "file":
-                getAvroSchemaFromLocalFileSystem(storage);
                 datasetMetaBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonPath));
                 if (Files.isReadable(Path.of(fileSystemDataFolder, datasetDocJsonPath))) {
                     datasetDocBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetDocJsonPath));
@@ -124,6 +128,7 @@ public class MetadataRouter {
                     datasetLineageBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetLinageJsonPath));
                 }
                 datasetMetaSignatureBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonSignaturePath));
+                avroSchema = getAvroSchemaFromLocalFileSystem(datasetUri);
                 break;
             case "gs":
                 String bucket = datasetUri.toURI().getHost();
@@ -140,6 +145,7 @@ public class MetadataRouter {
                 }
 
                 datasetMetaSignatureBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(datasetMetaJsonSignaturePath)));
+                avroSchema = getAvroSchemaFromGoogleCloudStorage(storage, datasetUri);
                 break;
             default:
                 throw new RuntimeException("Scheme not supported. scheme='" + scheme + "'");
@@ -148,25 +154,44 @@ public class MetadataRouter {
         return new MetadataReadAndVerifyResult(verified,
                 ByteString.copyFrom(datasetMetaBytes),
                 ofNullable(datasetDocBytes).map(ByteString::copyFrom).orElse(null),
-                ofNullable(datasetLineageBytes).map(ByteString::copyFrom).orElse(null)
+                ofNullable(datasetLineageBytes).map(ByteString::copyFrom).orElse(null),
+                avroSchema
         );
     }
 
-    private static String getAvroSchemaFromLocalFileSystem(Storage storage) {
-        // Seems like there is not a post fix so can't use this: Storage.BucketListOption.prefix("*.parquet")
-        Page<Bucket> list = storage.list(Storage.BucketListOption.pageSize(10));
-        Optional<Bucket> first = StreamSupport.stream(list.iterateAll().spliterator(), false)
-                .filter(b -> b.getName().endsWith(".parquet"))
-                .findFirst();
+    private static Schema getAvroSchemaFromLocalFileSystem(DatasetUri datasetUri) {
+        throw new UnsupportedOperationException("Not implemented yet");
+    }
 
-        if (first.isEmpty()) {
+    private static Schema getAvroSchemaFromGoogleCloudStorage(Storage storage, DatasetUri datasetUri) {
+        String bucket = datasetUri.toURI().getHost();
+        String prefix = datasetUri.toURI().getPath();
+        Page<Blob> page = storage.list(bucket, BlobListOption.prefix(prefix), BlobListOption.pageSize(10));
+        Blob firstParquetBlob = paginateUntil(page, b -> b.getName().endsWith(".parquet"));
+        if (firstParquetBlob == null) {
             return null;
         }
-        Bucket bucket = first.get();
+        Schema schema = ParquetTools.getAvroSchemaFromFile(new GCSReadChannelBasedInputFile(firstParquetBlob));
+        return schema;
+    }
 
-        // TODO: use ParquetTools.getAvroSchemaFromFile() to get avro schema
-
-        return null;
+    private static Blob paginateUntil(Page<Blob> firstPage, Predicate<? super Blob> predicate) {
+        return StreamSupport.stream(firstPage.iterateAll().spliterator(), false)
+                .filter(predicate)
+                .findFirst()
+                .orElseGet(() -> {
+                    Page<Blob> page = firstPage;
+                    while (page.hasNextPage()) {
+                        page = page.getNextPage();
+                        Optional<Blob> first = StreamSupport.stream(page.iterateAll().spliterator(), false)
+                                .filter(predicate)
+                                .findFirst();
+                        if (first.isPresent()) {
+                            return first.get();
+                        }
+                    }
+                    return null;
+                });
     }
 
     private static String stripLeadingSlashes(String input) {
@@ -179,15 +204,18 @@ public class MetadataRouter {
         final ByteString datasetMetaByteString;
         final ByteString datasetDocByteString;
         final ByteString datasetLineageByteString;
+        final Schema schema;
 
         MetadataReadAndVerifyResult(boolean signatureValid,
                                     ByteString datasetMetaByteString,
                                     ByteString datasetDocByteString,
-                                    ByteString datasetLineageByteString) {
+                                    ByteString datasetLineageByteString,
+                                    Schema schema) {
             this.signatureValid = signatureValid;
             this.datasetMetaByteString = datasetMetaByteString;
             this.datasetDocByteString = datasetDocByteString;
             this.datasetLineageByteString = datasetLineageByteString;
+            this.schema = schema;
         }
 
     }
