@@ -13,9 +13,19 @@ import java.net.URL;
 class ParquetToolsTest {
 
     @Test
-    void checkAvroSchemaFromFile() throws URISyntaxException, IOException {
+    void checkAvroSchemaFromClasspathResource() throws URISyntaxException, IOException {
         URL resourceUrl = getClass().getResource("dataset.parquet");
         Path parquetPath = new Path(resourceUrl.toURI().getRawPath());
+        HadoopInputFile hadoopInputFile = HadoopInputFile.fromPath(parquetPath, new Configuration());
+        Schema avroSchemaFromFile = ParquetTools.getAvroSchemaFromFile(hadoopInputFile);
+        System.out.println(avroSchemaFromFile);
+    }
+
+    @Test
+    void checkAvroSchemaFromLocalFilesystem() throws IOException {
+        String currentWorkingDirectory = System.getProperty("user.dir");
+        String absoluteFilePath = currentWorkingDirectory + "/src/test/resources/no/ssb/dapla/metadata/distributor/parquet/dataset.parquet";
+        Path parquetPath = new Path("file", null, absoluteFilePath);
         HadoopInputFile hadoopInputFile = HadoopInputFile.fromPath(parquetPath, new Configuration());
         Schema avroSchemaFromFile = ParquetTools.getAvroSchemaFromFile(hadoopInputFile);
         System.out.println(avroSchemaFromFile);
