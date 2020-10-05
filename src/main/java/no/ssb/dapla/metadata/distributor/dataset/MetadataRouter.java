@@ -7,12 +7,14 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutureCallback;
 import com.google.api.core.ApiFutures;
+import com.google.api.gax.paging.Page;
 import com.google.cloud.pubsub.v1.AckReplyConsumer;
 import com.google.cloud.pubsub.v1.MessageReceiver;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.Subscriber;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
+import com.google.cloud.storage.Bucket;
 import com.google.cloud.storage.Storage;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
@@ -31,12 +33,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.StreamSupport;
 
 import static java.util.Optional.ofNullable;
 
@@ -111,6 +115,7 @@ public class MetadataRouter {
         String scheme = datasetUri.toURI().getScheme();
         switch (scheme) {
             case "file":
+                getAvroSchemaFromLocalFileSystem(storage);
                 datasetMetaBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonPath));
                 if (Files.isReadable(Path.of(fileSystemDataFolder, datasetDocJsonPath))) {
                     datasetDocBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetDocJsonPath));
@@ -145,6 +150,23 @@ public class MetadataRouter {
                 ofNullable(datasetDocBytes).map(ByteString::copyFrom).orElse(null),
                 ofNullable(datasetLineageBytes).map(ByteString::copyFrom).orElse(null)
         );
+    }
+
+    private static String getAvroSchemaFromLocalFileSystem(Storage storage) {
+        // Seems like there is not a post fix so can't use this: Storage.BucketListOption.prefix("*.parquet")
+        Page<Bucket> list = storage.list(Storage.BucketListOption.pageSize(10));
+        Optional<Bucket> first = StreamSupport.stream(list.iterateAll().spliterator(), false)
+                .filter(b -> b.getName().endsWith(".parquet"))
+                .findFirst();
+
+        if (first.isEmpty()) {
+            return null;
+        }
+        Bucket bucket = first.get();
+
+        // TODO: use ParquetTools.getAvroSchemaFromFile() to get avro schema
+
+        return null;
     }
 
     private static String stripLeadingSlashes(String input) {
