@@ -55,6 +55,14 @@ class FilesystemMetadataPropagationTest {
 
         String dataFolder = System.getProperty("user.dir") + "/target/data";
         DatasetMeta datasetMeta = createDatasetMeta(0);
+
+        // copy parquet file to folder
+        Files.createDirectories(Path.of(dataFolder, datasetMeta.getId().getPath(), datasetMeta.getId().getVersion()));
+        Files.copy(
+                Path.of("src/test/resources/no/ssb/dapla/metadata/distributor/parquet/dataset.parquet"),
+                Path.of(dataFolder, datasetMeta.getId().getPath(), datasetMeta.getId().getVersion(), "dataset.parquet")
+        );
+
         writeContentAsUtf8ToFile(dataFolder, datasetMeta, ".dataset-meta.json", ProtobufJsonUtils.toString(datasetMeta));
         String metadataPath = datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json";
         DataChangedRequest request = DataChangedRequest.newBuilder()

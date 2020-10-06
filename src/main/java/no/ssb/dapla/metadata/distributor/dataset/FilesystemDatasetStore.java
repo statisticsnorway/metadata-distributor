@@ -66,7 +66,7 @@ public class FilesystemDatasetStore implements DatasetStore {
         try {
             String datasetFolder = datasetUri.toURI().getRawPath();
             firstParquetFile = Files.list(Path.of(datasetFolder))
-                    .filter(p -> p.getFileName().endsWith(".parquet"))
+                    .filter(p -> p.getFileName().toString().endsWith(".parquet"))
                     .findFirst()
                     .orElseThrow(() -> new RuntimeException("No parquet file in folder: " + datasetFolder));
         } catch (IOException e) {
