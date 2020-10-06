@@ -223,6 +223,10 @@ public class MetadataRouter {
                     downstreamMessageDataNode.set("dataset-lineage", datasetMetaNode);
                 }
             }
+            if (metadataReadAndVerifyResult.schema != null) {
+                JsonNode avroSchemaNode = objectMapper.readTree(metadataReadAndVerifyResult.schema.toString());
+                downstreamMessageDataNode.set("avro-schema", avroSchemaNode);
+            }
             ByteString downstreamMessageData = ByteString.copyFrom(objectMapper.writeValueAsBytes(downstreamMessageDataNode));
 
             for (Publisher publisher : publishers) {

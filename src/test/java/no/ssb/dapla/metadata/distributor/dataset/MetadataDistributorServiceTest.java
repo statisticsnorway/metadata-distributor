@@ -72,6 +72,13 @@ class MetadataDistributorServiceTest {
         for (int i = 0; i < 2; i++) {
             DatasetMeta datasetMeta = createDatasetMeta(i);
 
+            // copy parquet file to folder
+            Files.createDirectories(Path.of(dataFolder, datasetMeta.getId().getPath(), datasetMeta.getId().getVersion()));
+            Files.copy(
+                    Path.of("src/test/resources/no/ssb/dapla/metadata/distributor/parquet/dataset.parquet"),
+                    Path.of(dataFolder, datasetMeta.getId().getPath(), datasetMeta.getId().getVersion(), "dataset.parquet")
+            );
+
             writeContentAsUtf8ToFile(dataFolder, datasetMeta, ".dataset-meta.json", ProtobufJsonUtils.toString(datasetMeta));
             writeContentAsUtf8ToFile(dataFolder, datasetMeta, ".dataset-doc.json", "{}");
 
