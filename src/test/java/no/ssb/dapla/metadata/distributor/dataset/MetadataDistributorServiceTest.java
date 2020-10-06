@@ -14,7 +14,6 @@ import com.google.pubsub.v1.PubsubMessage;
 import com.google.pubsub.v1.PullRequest;
 import com.google.pubsub.v1.PullResponse;
 import com.google.pubsub.v1.ReceivedMessage;
-import io.grpc.Channel;
 import no.ssb.dapla.dataset.api.DatasetId;
 import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.dataset.api.DatasetState;
@@ -24,14 +23,13 @@ import no.ssb.dapla.dataset.api.Valuation;
 import no.ssb.dapla.metadata.distributor.MetadataDistributorApplication;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
-import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc;
-import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc.MetadataDistributorServiceBlockingStub;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.EmulatorPubSub;
 import no.ssb.pubsub.PubSub;
 import no.ssb.pubsub.PubSubAdmin;
 import no.ssb.testing.helidon.ConfigOverride;
 import no.ssb.testing.helidon.IntegrationTestExtension;
+import no.ssb.testing.helidon.TestClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -52,22 +50,29 @@ import static org.assertj.core.api.Assertions.assertThat;
         "pubsub.metadata-routing.0.upstream.0.subscribe", "false",
 })
 @ExtendWith(IntegrationTestExtension.class)
-class MetadataDistributorGrpcServiceTest {
+class MetadataDistributorServiceTest {
 
     @Inject
     MetadataDistributorApplication application;
 
     @Inject
-    Channel channel;
+    TestClient client;
 
     @Test
     void thatThisWorks() throws IOException {
+        boolean a= true;
+        while (a) {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
         MetadataSigner metadataSigner = new MetadataSigner("PKCS12", "src/test/resources/metadata-signer_keystore.p12",
                 "dataAccessKeyPair", "changeit".toCharArray(), "SHA256withRSA");
 
         initTopicAndSubscription("dapla", "file-events-1", "junit");
-
-        MetadataDistributorServiceBlockingStub distributor = MetadataDistributorServiceGrpc.newBlockingStub(channel);
 
         String dataFolder = System.getProperty("user.dir") + "/target/data";
 
@@ -88,7 +93,7 @@ class MetadataDistributorGrpcServiceTest {
                         .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json")
                         .build();
 
-                DataChangedResponse response = distributor.dataChanged(request);
+                DataChangedResponse response = client.postJson("/rpc/MetadataDistributorService/dataChanged", request, DataChangedResponse.class).expect200Ok().body();
 
                 assertThat(response.getMessageId()).isNotNull();
 
@@ -101,7 +106,7 @@ class MetadataDistributorGrpcServiceTest {
                         .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-doc.json")
                         .build();
 
-                DataChangedResponse response = distributor.dataChanged(request);
+                DataChangedResponse response = client.postJson("rpc/MetadataDistributorService/dataChanged", request, DataChangedResponse.class).expect200Ok().body();
 
                 assertThat(response.getMessageId()).isNotNull();
 
@@ -119,7 +124,7 @@ class MetadataDistributorGrpcServiceTest {
                     .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign")
                     .build();
 
-            DataChangedResponse signatureResponse = distributor.dataChanged(signatureRequest);
+            DataChangedResponse signatureResponse = client.postJson("rpc/MetadataDistributorService/dataChanged", signatureRequest, DataChangedResponse.class).expect200Ok().body();
 
             assertThat(signatureResponse.getMessageId()).isNotNull();
 

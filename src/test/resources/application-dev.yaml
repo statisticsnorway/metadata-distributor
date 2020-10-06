@@ -1,6 +1,3 @@
-grpcserver:
-  port: 0
-
 webserver:
   port: 0
 

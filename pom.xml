@@ -4,9 +4,9 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>no.ssb.dapla</groupId>
-        <artifactId>application</artifactId>
-        <version>12</version>
+        <groupId>io.helidon.applications</groupId>
+        <artifactId>helidon-se</artifactId>
+        <version>1.4.7</version>
         <relativePath/>
     </parent>
 
@@ -17,6 +17,17 @@
 
     <properties>
         <exec.mainClass>no.ssb.dapla.metadata.distributor.MetadataDistributorApplication</exec.mainClass>
+        <helidon.version>1.4.7</helidon.version>
+        <slf4j.version>1.7.30</slf4j.version>
+        <jaeger.version>0.35.5</jaeger.version>
+        <opentracing.version>0.32.0</opentracing.version>
+        <jdk.version>11</jdk.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven-surefire-plugin.version>2.19.1</maven-surefire-plugin.version>
+        <maven-failsafe-plugin.version>2.19.1</maven-failsafe-plugin.version>
+        <maven-enforcer-plugin.version>1.4.1</maven-enforcer-plugin.version>
+        <maven-compiler-plugin.version>3.8.1</maven-compiler-plugin.version>
     </properties>
 
     <repositories>
@@ -48,13 +59,9 @@
             <version>0.2</version>
         </dependency>
         <dependency>
-            <groupId>no.ssb.helidon</groupId>
-            <artifactId>helidon-application</artifactId>
-            <version>0.3.2</version>
-        </dependency>
-        <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-pubsub</artifactId>
+            <version>1.103.0</version>
         </dependency>
         <dependency>
             <groupId>no.ssb.pubsub</groupId>
@@ -64,10 +71,29 @@
         <dependency>
             <groupId>no.ssb.dapla</groupId>
             <artifactId>dataset-uri</artifactId>
+            <version>0.1</version>
         </dependency>
+        <dependency>
+            <groupId>no.ssb.helidon</groupId>
+            <artifactId>helidon-media-protobuf-json-server</artifactId>
+            <version>0.2</version>
+        </dependency>
+        <dependency>
+            <groupId>no.ssb.jpms</groupId>
+            <artifactId>jsr305-and-javax.annotation-api</artifactId>
+            <version>1.2</version>
+        </dependency>
+        <dependency>
+            <groupId>no.ssb.jpms</groupId>
+            <artifactId>gax-grpc-and-proto-google-common-protos</artifactId>
+            <version>1.2</version>
+        </dependency>
+
+
         <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>
+            <version>1.104.0</version>
         </dependency>
 
         <dependency>
@@ -110,19 +136,167 @@
                     <groupId>com.google.code.findbugs</groupId>
                     <artifactId>jsr305</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
+
         <dependency>
-            <groupId>no.ssb.helidon</groupId>
-            <artifactId>helidon-testing</artifactId>
-            <version>0.5</version>
+            <groupId>io.helidon.webserver</groupId>
+            <artifactId>helidon-webserver</artifactId>
+            <version>${helidon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.webserver</groupId>
+            <artifactId>helidon-webserver-access-log</artifactId>
+            <version>${helidon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.config</groupId>
+            <artifactId>helidon-config-yaml</artifactId>
+            <version>${helidon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.health</groupId>
+            <artifactId>helidon-health</artifactId>
+            <version>${helidon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.health</groupId>
+            <artifactId>helidon-health-checks</artifactId>
+            <version>${helidon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.metrics</groupId>
+            <artifactId>helidon-metrics2</artifactId>
+            <version>${helidon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.microprofile.config</groupId>
+            <artifactId>helidon-microprofile-config</artifactId>
+            <version>${helidon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.tracing</groupId>
+            <artifactId>helidon-tracing</artifactId>
+            <version>${helidon.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.helidon.tracing</groupId>
+            <artifactId>helidon-tracing-jaeger</artifactId>
+            <version>${helidon.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-jdk14</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>javax.inject</groupId>
+            <artifactId>javax.inject</artifactId>
+            <version>1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>jul-to-slf4j</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.2.3</version>
+        </dependency>
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>6.3</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.10.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>3.14.0</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>5.5.2</version>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <build>
+        <!-- restore default maven final artifact name -->
+        <finalName>${project.artifactId}-${project.version}</finalName>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${maven-surefire-plugin.version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${maven-compiler-plugin.version}</version>
+                    <configuration>
+                        <release>${jdk.version}</release>
+                        <testRelease>${jdk.version}</testRelease>
+                        <target>${jdk.version}</target>
+                        <source>${jdk.version}</source>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-enforcer-plugin</artifactId>
+                    <version>${maven-enforcer-plugin.version}</version>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>enforce</goal>
+                            </goals>
+                            <configuration>
+                                <rules>
+                                    <bannedDependencies>
+                                        <excludes>
+                                            <exclude>com.google.code.findbugs:jsr305
+                                            </exclude> <!-- replaced by no.ssb.jpms:jsr305-and-javax.annotation-api -->
+                                            <exclude>javax.annotation:javax.annotation-api
+                                            </exclude> <!-- replaced by no.ssb.jpms:jsr305-and-javax.annotation-api -->
+                                            <exclude>com.google.api:gax-grpc
+                                            </exclude> <!-- replaced by no.ssb.jpms:gax-grpc-and-proto-google-common-protos -->
+                                            <exclude>com.google.api.grpc:proto-google-common-protos
+                                            </exclude> <!-- replaced by no.ssb.jpms:gax-grpc-and-proto-google-common-protos -->
+                                        </excludes>
+                                    </bannedDependencies>
+                                </rules>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+            </plugin>
             <plugin>
                 <groupId>com.rodiontsev.maven.plugins</groupId>
                 <artifactId>build-info-maven-plugin</artifactId>
@@ -133,4 +307,22 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>ssb-bip</id>
+            <distributionManagement>
+                <repository>
+                    <id>ssb-bip-releases</id>
+                    <name>SSB Nexus Releases</name>
+                    <url>https://nexus.prod-bip-ci.ssb.no/repository/maven-releases/</url>
+                </repository>
+                <snapshotRepository>
+                    <id>ssb-bip-snapshots</id>
+                    <name>SSB Snapshot Repository</name>
+                    <url>https://nexus.prod-bip-ci.ssb.no/repository/maven-snapshots/</url>
+                </snapshotRepository>
+            </distributionManagement>
+        </profile>
+    </profiles>
 </project>
