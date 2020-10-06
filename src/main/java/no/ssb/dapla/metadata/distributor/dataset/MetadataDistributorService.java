@@ -20,7 +20,6 @@ import io.helidon.webserver.Service;
 import io.opentracing.Span;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
-import no.ssb.helidon.application.TracerAndSpan;
 import no.ssb.helidon.application.Tracing;
 import no.ssb.pubsub.PubSub;
 import org.slf4j.Logger;
@@ -29,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -55,8 +55,7 @@ public class MetadataDistributorService implements Service {
 
     private void dataChanged(ServerRequest req, ServerResponse res, DataChangedRequest request) {
         StreamObserver<DataChangedResponse> responseObserver;
-        TracerAndSpan tracerAndSpan = spanFromHttp(req, "dataChanged");
-        Span span = tracerAndSpan.span();
+        Optional<Span> ospan = spanFromHttp(req, "dataChanged");
         try {
             String projectId = request.getProjectId();
             String topicName = request.getTopicName();
@@ -103,34 +102,34 @@ public class MetadataDistributorService implements Service {
                 @Override
                 public void onSuccess(String messageId) {
                     try {
-                        restoreTracingContext(tracerAndSpan);
-                        span.log(Map.of("event", "successfully published message", "messageId", messageId));
+                        ospan.ifPresent(span -> restoreTracingContext(req.tracer(), span));
+                        ospan.ifPresent(span -> span.log(Map.of("event", "successfully published message", "messageId", messageId)));
                         res.send(DataChangedResponse.newBuilder().setMessageId(messageId).build());
                     } finally {
-                        span.finish();
+                        ospan.ifPresent(Span::finish);
                     }
                 }
 
                 @Override
                 public void onFailure(Throwable t) {
                     try {
-                        restoreTracingContext(tracerAndSpan);
+                        ospan.ifPresent(span -> restoreTracingContext(req.tracer(), span));
                         String errorMsg = "while attempting to publish message to Google PubSub topic: " + publisher.getTopicNameString();
                         LOG.error(errorMsg, t);
-                        Tracing.logError(span, t, "while attempting to publish message to Google PubSub", "topic", publisher.getTopicNameString());
+                        ospan.ifPresent(span -> Tracing.logError(span, t, "while attempting to publish message to Google PubSub", "topic", publisher.getTopicNameString()));
                         res.status(400).send(errorMsg);
                     } finally {
-                        span.finish();
+                        ospan.ifPresent(Span::finish);
                     }
                 }
             }, MoreExecutors.directExecutor());
         } catch (RuntimeException | Error | URISyntaxException | JsonProcessingException e) {
             try {
-                Tracing.logError(span, e);
+                ospan.ifPresent(span -> Tracing.logError(span, e));
                 LOG.error("unexpected error", e);
                 res.status(500).send("unexpected error");
             } finally {
-                span.finish();
+                ospan.ifPresent(Span::finish);
             }
         }
     }

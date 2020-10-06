@@ -6,18 +6,24 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
+import io.helidon.common.reactive.Single;
 import io.helidon.config.Config;
+import io.helidon.metrics.MetricsSupport;
+import io.helidon.tracing.TracerBuilder;
 import io.helidon.webserver.Routing;
-import io.helidon.webserver.ServerConfiguration;
 import io.helidon.webserver.WebServer;
+import io.helidon.webserver.accesslog.AccessLogSupport;
 import io.opentracing.Tracer;
 import no.ssb.dapla.metadata.distributor.dataset.DefaultMetadataSignatureVerifier;
+import no.ssb.dapla.metadata.distributor.dataset.FilesystemDatasetStore;
+import no.ssb.dapla.metadata.distributor.dataset.GCSDatasetStore;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataDistributorService;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouter;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataRouterTopicAndSubscriptionInitialization;
 import no.ssb.dapla.metadata.distributor.dataset.MetadataSignatureVerifier;
 import no.ssb.dapla.metadata.distributor.health.Health;
 import no.ssb.dapla.metadata.distributor.health.ReadinessSample;
+import no.ssb.helidon.media.protobuf.ProtobufJsonSupport;
 import no.ssb.pubsub.EmulatorPubSub;
 import no.ssb.pubsub.PubSub;
 import no.ssb.pubsub.RealPubSub;
@@ -133,27 +139,29 @@ public class MetadataDistributorApplication {
 
         config.get("pubsub.metadata-routing").asNodeList().get().stream().forEach(routing -> {
             String fileSystemDataFolder = config.get("storage.file-system.data-folder").asString().orElse("");
-            metadataRouters.add(new MetadataRouter(routing, pubSub, storage, metadataSignatureVerifier, fileSystemDataFolder));
+            metadataRouters.add(new MetadataRouter(routing, pubSub, metadataSignatureVerifier,
+                    new GCSDatasetStore(storage, metadataSignatureVerifier),
+                    new FilesystemDatasetStore(fileSystemDataFolder, metadataSignatureVerifier)
+            ));
         });
 
         Routing routing = Routing.builder()
-                //.register(AccessLogSupport.create(config.get("webserver.access-log")))
-                //.register(WebTracingConfig.create(config.get("tracing")))
-                //.register(ProtobufJsonSupport.create())
-                //.register(MetricsSupport.create())
-                //.register(health)
-                //.register("/rpc/MetadataDistributorService", metadataDistributorService)
+                .register(AccessLogSupport.create(config.get("webserver.access-log")))
+                .register(MetricsSupport.create())
+                .register(health)
+                .register("/rpc/MetadataDistributorService", metadataDistributorService)
                 .get("/hei", (req, res) -> {
                     res.status(200).send();
                 })
                 .build();
         put(Routing.class, routing);
 
-        WebServer webServer = WebServer.create(
-                ServerConfiguration.builder(config.get("webserver"))
-                        .tracer(tracer)
-                        .build(),
-                routing);
+        WebServer webServer = WebServer.builder()
+                .config(config.get("webserver"))
+                .tracer(TracerBuilder.create(config.get("tracing")).registerGlobal(true).build())
+                .addMediaSupport(ProtobufJsonSupport.create())
+                .routing(routing)
+                .build();
         put(WebServer.class, webServer);
     }
 
@@ -220,14 +228,14 @@ public class MetadataDistributorApplication {
     public CompletionStage<MetadataDistributorApplication> start() {
         return ofNullable(this.get(WebServer.class))
                 .map(WebServer::start)
-                .orElse(CompletableFuture.completedFuture(null))
-                .thenApply(webServer -> this);
+                .orElse(Single.empty())
+                .map(webServer -> this);
     }
 
     public CompletionStage<MetadataDistributorApplication> stop() {
         return ofNullable(this.get(WebServer.class))
                 .map(WebServer::shutdown)
-                .orElse(CompletableFuture.completedFuture(null))
+                .orElse(Single.empty())
                 .thenCombine(CompletableFuture.runAsync(() -> {
                     List<CompletableFuture<MetadataRouter>> metadataRouterFutures = new ArrayList<>();
                     for (MetadataRouter metadataRouter : metadataRouters) {

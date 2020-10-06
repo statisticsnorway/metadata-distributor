@@ -1,8 +1,6 @@
 package no.ssb.testing.helidon;
 
 import io.helidon.config.Config;
-import io.helidon.config.ConfigSources;
-import io.helidon.config.spi.ConfigSource;
 import io.helidon.webserver.WebServer;
 import no.ssb.dapla.metadata.distributor.MetadataDistributorApplication;
 import no.ssb.dapla.metadata.distributor.MetadataDistributorApplicationBuilder;
@@ -16,13 +14,11 @@ import org.slf4j.LoggerFactory;
 import javax.inject.Inject;
 import java.lang.reflect.Field;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 
 import static io.helidon.config.ConfigSources.classpath;
+import static io.helidon.config.ConfigSources.create;
 import static io.helidon.config.ConfigSources.file;
 
 public class IntegrationTestExtension implements BeforeEachCallback, BeforeAllCallback, AfterAllCallback {
@@ -41,7 +37,7 @@ public class IntegrationTestExtension implements BeforeEachCallback, BeforeAllCa
     public void beforeAll(ExtensionContext extensionContext) throws Exception {
         Class<?> testClass = extensionContext.getRequiredTestClass();
 
-        List<Supplier<ConfigSource>> configSourceSupplierList = new LinkedList<>();
+        Config.Builder builder = Config.builder();
         ConfigOverride configOverride = testClass.getDeclaredAnnotation(ConfigOverride.class);
         if (configOverride != null) {
             String[] overrideArray = configOverride.value();
@@ -49,26 +45,26 @@ public class IntegrationTestExtension implements BeforeEachCallback, BeforeAllCa
             for (int i = 0; i < overrideArray.length; i += 2) {
                 configOverrideMap.put(overrideArray[i], overrideArray[i + 1]);
             }
-            configSourceSupplierList.add(ConfigSources.create(configOverrideMap));
+            builder.addSource(create(configOverrideMap));
         }
         String overrideFile = System.getenv("HELIDON_CONFIG_FILE");
         if (overrideFile != null) {
-            configSourceSupplierList.add(file(overrideFile).optional());
+            builder.addSource(file(overrideFile).optional());
         }
         String profile = System.getenv("HELIDON_CONFIG_PROFILE");
         if (profile == null) {
             profile = "dev";
         }
         if (profile.equalsIgnoreCase("dev")) {
-            configSourceSupplierList.add(classpath("application-dev.yaml"));
+            builder.addSource(classpath("application-dev.yaml"));
         } else if (profile.equalsIgnoreCase("azure")) {
-            configSourceSupplierList.add(classpath("application-azure.yaml"));
+            builder.addSource(classpath("application-azure.yaml"));
         } else {
             // default to dev
-            configSourceSupplierList.add(classpath("application-dev.yaml"));
+            builder.addSource(classpath("application-dev.yaml"));
         }
-        configSourceSupplierList.add(classpath("application.yaml"));
-        Config config = Config.builder().sources(configSourceSupplierList).build();
+        builder.addSource(classpath("application.yaml"));
+        Config config = builder.build();
 
         MetadataDistributorApplicationBuilder applicationBuilder = new MetadataDistributorApplicationBuilder();
         applicationBuilder.override(Config.class, config);

@@ -60,15 +60,6 @@ class MetadataDistributorServiceTest {
 
     @Test
     void thatThisWorks() throws IOException {
-        boolean a= true;
-        while (a) {
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
-
         MetadataSigner metadataSigner = new MetadataSigner("PKCS12", "src/test/resources/metadata-signer_keystore.p12",
                 "dataAccessKeyPair", "changeit".toCharArray(), "SHA256withRSA");
 
@@ -106,7 +97,7 @@ class MetadataDistributorServiceTest {
                         .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-doc.json")
                         .build();
 
-                DataChangedResponse response = client.postJson("rpc/MetadataDistributorService/dataChanged", request, DataChangedResponse.class).expect200Ok().body();
+                DataChangedResponse response = client.postJson("/rpc/MetadataDistributorService/dataChanged", request, DataChangedResponse.class).expect200Ok().body();
 
                 assertThat(response.getMessageId()).isNotNull();
 
@@ -124,7 +115,7 @@ class MetadataDistributorServiceTest {
                     .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign")
                     .build();
 
-            DataChangedResponse signatureResponse = client.postJson("rpc/MetadataDistributorService/dataChanged", signatureRequest, DataChangedResponse.class).expect200Ok().body();
+            DataChangedResponse signatureResponse = client.postJson("/rpc/MetadataDistributorService/dataChanged", signatureRequest, DataChangedResponse.class).expect200Ok().body();
 
             assertThat(signatureResponse.getMessageId()).isNotNull();
 
