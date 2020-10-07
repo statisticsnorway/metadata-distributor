@@ -113,6 +113,16 @@
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-pubsub</artifactId>
             <version>1.108.3</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.google.code.findbugs</groupId>
+                    <artifactId>jsr305</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.annotation</groupId>
+                    <artifactId>javax.annotation-api</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>no.ssb.pubsub</groupId>
@@ -144,6 +154,16 @@
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>
             <version>1.113.1</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.google.code.findbugs</groupId>
+                    <artifactId>jsr305</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.annotation</groupId>
+                    <artifactId>javax.annotation-api</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -185,6 +205,10 @@
                 <exclusion>
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.google.code.findbugs</groupId>
+                    <artifactId>jsr305</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -302,10 +326,6 @@
                                             </exclude> <!-- replaced by no.ssb.jpms:jsr305-and-javax.annotation-api -->
                                             <exclude>javax.annotation:javax.annotation-api
                                             </exclude> <!-- replaced by no.ssb.jpms:jsr305-and-javax.annotation-api -->
-                                            <exclude>com.google.api:gax-grpc
-                                            </exclude> <!-- replaced by no.ssb.jpms:gax-grpc-and-proto-google-common-protos -->
-                                            <exclude>com.google.api.grpc:proto-google-common-protos
-                                            </exclude> <!-- replaced by no.ssb.jpms:gax-grpc-and-proto-google-common-protos -->
                                         </excludes>
                                     </bannedDependencies>
                                 </rules>
