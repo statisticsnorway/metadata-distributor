@@ -2,10 +2,9 @@ package no.ssb.dapla.metadata.distributor.dataset;
 
 import com.google.protobuf.ByteString;
 import no.ssb.dapla.dataset.uri.DatasetUri;
+import no.ssb.dapla.metadata.distributor.parquet.NIOPathBasedInputFile;
 import no.ssb.dapla.metadata.distributor.parquet.ParquetTools;
 import org.apache.avro.Schema;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.parquet.hadoop.util.HadoopInputFile;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -72,14 +71,7 @@ public class FilesystemDatasetStore implements DatasetStore {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        org.apache.hadoop.fs.Path hadoopPath = new org.apache.hadoop.fs.Path(firstParquetFile.toString());
-        HadoopInputFile hadoopInputFile;
-        try {
-            hadoopInputFile = HadoopInputFile.fromPath(hadoopPath, new Configuration());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        Schema schema = ParquetTools.getAvroSchemaFromFile(hadoopInputFile);
+        Schema schema = ParquetTools.getAvroSchemaFromFile(new NIOPathBasedInputFile(firstParquetFile));
         return schema;
     }
 }
