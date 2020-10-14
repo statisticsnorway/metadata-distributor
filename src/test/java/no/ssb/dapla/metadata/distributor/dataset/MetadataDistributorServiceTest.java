@@ -14,7 +14,6 @@ import com.google.pubsub.v1.PubsubMessage;
 import com.google.pubsub.v1.PullRequest;
 import com.google.pubsub.v1.PullResponse;
 import com.google.pubsub.v1.ReceivedMessage;
-import io.grpc.Channel;
 import no.ssb.dapla.dataset.api.DatasetId;
 import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.dataset.api.DatasetState;
@@ -24,14 +23,13 @@ import no.ssb.dapla.dataset.api.Valuation;
 import no.ssb.dapla.metadata.distributor.MetadataDistributorApplication;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
-import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc;
-import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc.MetadataDistributorServiceBlockingStub;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.EmulatorPubSub;
 import no.ssb.pubsub.PubSub;
 import no.ssb.pubsub.PubSubAdmin;
 import no.ssb.testing.helidon.ConfigOverride;
 import no.ssb.testing.helidon.IntegrationTestExtension;
+import no.ssb.testing.helidon.TestClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -52,13 +50,13 @@ import static org.assertj.core.api.Assertions.assertThat;
         "pubsub.metadata-routing.0.upstream.0.subscribe", "false",
 })
 @ExtendWith(IntegrationTestExtension.class)
-class MetadataDistributorGrpcServiceTest {
+class MetadataDistributorServiceTest {
 
     @Inject
     MetadataDistributorApplication application;
 
     @Inject
-    Channel channel;
+    TestClient client;
 
     @Test
     void thatThisWorks() throws IOException {
@@ -67,14 +65,19 @@ class MetadataDistributorGrpcServiceTest {
 
         initTopicAndSubscription("dapla", "file-events-1", "junit");
 
-        MetadataDistributorServiceBlockingStub distributor = MetadataDistributorServiceGrpc.newBlockingStub(channel);
-
         String dataFolder = System.getProperty("user.dir") + "/target/data";
 
         Set<String> messageIds = new LinkedHashSet<>();
 
         for (int i = 0; i < 2; i++) {
             DatasetMeta datasetMeta = createDatasetMeta(i);
+
+            // copy parquet file to folder
+            Files.createDirectories(Path.of(dataFolder, datasetMeta.getId().getPath(), datasetMeta.getId().getVersion()));
+            Files.copy(
+                    Path.of("src/test/resources/no/ssb/dapla/metadata/distributor/parquet/dataset.parquet"),
+                    Path.of(dataFolder, datasetMeta.getId().getPath(), datasetMeta.getId().getVersion(), "dataset.parquet")
+            );
 
             writeContentAsUtf8ToFile(dataFolder, datasetMeta, ".dataset-meta.json", ProtobufJsonUtils.toString(datasetMeta));
             writeContentAsUtf8ToFile(dataFolder, datasetMeta, ".dataset-doc.json", "{}");
@@ -88,7 +91,7 @@ class MetadataDistributorGrpcServiceTest {
                         .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json")
                         .build();
 
-                DataChangedResponse response = distributor.dataChanged(request);
+                DataChangedResponse response = client.postJson("/rpc/MetadataDistributorService/dataChanged", request, DataChangedResponse.class).expect200Ok().body();
 
                 assertThat(response.getMessageId()).isNotNull();
 
@@ -101,7 +104,7 @@ class MetadataDistributorGrpcServiceTest {
                         .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-doc.json")
                         .build();
 
-                DataChangedResponse response = distributor.dataChanged(request);
+                DataChangedResponse response = client.postJson("/rpc/MetadataDistributorService/dataChanged", request, DataChangedResponse.class).expect200Ok().body();
 
                 assertThat(response.getMessageId()).isNotNull();
 
@@ -119,7 +122,7 @@ class MetadataDistributorGrpcServiceTest {
                     .setUri(parentUri + datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign")
                     .build();
 
-            DataChangedResponse signatureResponse = distributor.dataChanged(signatureRequest);
+            DataChangedResponse signatureResponse = client.postJson("/rpc/MetadataDistributorService/dataChanged", signatureRequest, DataChangedResponse.class).expect200Ok().body();
 
             assertThat(signatureResponse.getMessageId()).isNotNull();
 

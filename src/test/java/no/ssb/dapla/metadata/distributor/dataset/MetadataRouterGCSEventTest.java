@@ -21,6 +21,7 @@ import javax.inject.Inject;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -55,6 +56,9 @@ public class MetadataRouterGCSEventTest {
         Storage storage = application.get(Storage.class);
         PubSub pubSub = application.get(PubSub.class);
         MetadataSignatureVerifier metadataSignatureVerifier = (data, receivedSign) -> true;
+        Map<String, DatasetStore> datasetStoreByScheme = new ConcurrentHashMap<>();
+        GCSDatasetStore gcsDatasetStore = new GCSDatasetStore(storage, metadataSignatureVerifier);
+        datasetStoreByScheme.put(gcsDatasetStore.supportedScheme(), gcsDatasetStore);
 
         String bucketName = "ssb-dev-md-test";
 
@@ -88,7 +92,7 @@ public class MetadataRouterGCSEventTest {
             try {
                 System.out.printf("message: %s%n", message);
 
-                MetadataRouter.process(storage, "", metadataSignatureVerifier, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, consumer::ack);
+                MetadataRouter.process(datasetStoreByScheme, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, consumer::ack);
 
                 Map<String, String> attributes = message.getAttributesMap();
                 String objectId = attributes.get("objectId");

@@ -9,7 +9,6 @@ import com.google.cloud.pubsub.v1.SubscriptionAdminClient;
 import com.google.cloud.pubsub.v1.TopicAdminClient;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
-import io.grpc.Channel;
 import no.ssb.dapla.dataset.api.DatasetId;
 import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.dataset.api.DatasetState;
@@ -19,12 +18,11 @@ import no.ssb.dapla.dataset.api.Valuation;
 import no.ssb.dapla.metadata.distributor.MetadataDistributorApplication;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
-import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc;
-import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc.MetadataDistributorServiceBlockingStub;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.PubSub;
 import no.ssb.pubsub.PubSubAdmin;
 import no.ssb.testing.helidon.IntegrationTestExtension;
+import no.ssb.testing.helidon.TestClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -47,7 +45,7 @@ class FilesystemMetadataPropagationTest {
     MetadataDistributorApplication application;
 
     @Inject
-    Channel channel;
+    TestClient client;
 
     static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -55,10 +53,16 @@ class FilesystemMetadataPropagationTest {
     void thatThisWorks() throws IOException, InterruptedException {
         initTopicAndSubscription("dapla", "catalog-1", "catalog-1-junit");
 
-        MetadataDistributorServiceBlockingStub distributor = MetadataDistributorServiceGrpc.newBlockingStub(channel);
-
         String dataFolder = System.getProperty("user.dir") + "/target/data";
         DatasetMeta datasetMeta = createDatasetMeta(0);
+
+        // copy parquet file to folder
+        Files.createDirectories(Path.of(dataFolder, datasetMeta.getId().getPath(), datasetMeta.getId().getVersion()));
+        Files.copy(
+                Path.of("src/test/resources/no/ssb/dapla/metadata/distributor/parquet/dataset.parquet"),
+                Path.of(dataFolder, datasetMeta.getId().getPath(), datasetMeta.getId().getVersion(), "dataset.parquet")
+        );
+
         writeContentAsUtf8ToFile(dataFolder, datasetMeta, ".dataset-meta.json", ProtobufJsonUtils.toString(datasetMeta));
         String metadataPath = datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json";
         DataChangedRequest request = DataChangedRequest.newBuilder()
@@ -66,7 +70,8 @@ class FilesystemMetadataPropagationTest {
                 .setTopicName("file-events-1")
                 .setUri("file:" + dataFolder + metadataPath)
                 .build();
-        DataChangedResponse response = distributor.dataChanged(request);
+
+        DataChangedResponse response = client.postJson("/rpc/MetadataDistributorService/dataChanged", request, DataChangedResponse.class).expect200Ok().body();
         assertThat(response.getMessageId()).isNotNull();
 
         writeContentAsUtf8ToFile(dataFolder, datasetMeta, ".dataset-doc.json", "{}");
@@ -82,7 +87,7 @@ class FilesystemMetadataPropagationTest {
                 .setTopicName("file-events-1")
                 .setUri("file:" + dataFolder + metadataSignaturePath)
                 .build();
-        DataChangedResponse signatureResponse = distributor.dataChanged(signatureRequest);
+        DataChangedResponse signatureResponse = client.postJson("/rpc/MetadataDistributorService/dataChanged", signatureRequest, DataChangedResponse.class).expect200Ok().body();
         assertThat(signatureResponse.getMessageId()).isNotNull();
 
         final CountDownLatch latch = new CountDownLatch(1);

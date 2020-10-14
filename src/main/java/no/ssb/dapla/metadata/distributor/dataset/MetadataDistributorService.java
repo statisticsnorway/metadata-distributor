@@ -12,11 +12,14 @@ import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.ProjectTopicName;
 import com.google.pubsub.v1.PubsubMessage;
 import io.grpc.stub.StreamObserver;
+import io.helidon.webserver.Handler;
+import io.helidon.webserver.Routing;
+import io.helidon.webserver.ServerRequest;
+import io.helidon.webserver.ServerResponse;
+import io.helidon.webserver.Service;
 import io.opentracing.Span;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
-import no.ssb.dapla.metadata.distributor.protobuf.MetadataDistributorServiceGrpc;
-import no.ssb.helidon.application.TracerAndSpan;
 import no.ssb.helidon.application.Tracing;
 import no.ssb.pubsub.PubSub;
 import org.slf4j.Logger;
@@ -25,29 +28,34 @@ import org.slf4j.LoggerFactory;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static no.ssb.helidon.application.Tracing.restoreTracingContext;
-import static no.ssb.helidon.application.Tracing.spanFromGrpc;
+import static no.ssb.helidon.application.Tracing.spanFromHttp;
 
-public class MetadataDistributorGrpcService extends MetadataDistributorServiceGrpc.MetadataDistributorServiceImplBase {
+public class MetadataDistributorService implements Service {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MetadataDistributorGrpcService.class);
+    private static final Logger LOG = LoggerFactory.getLogger(MetadataDistributorService.class);
 
     final PubSub pubSub;
     final Map<ProjectTopicName, Publisher> publisherByProjectTopicName = new ConcurrentHashMap<>();
     final ObjectMapper mapper = new ObjectMapper();
 
-    public MetadataDistributorGrpcService(PubSub pubSub) {
+    public MetadataDistributorService(PubSub pubSub) {
         this.pubSub = pubSub;
     }
 
     @Override
-    public void dataChanged(DataChangedRequest request, StreamObserver<DataChangedResponse> responseObserver) {
-        TracerAndSpan tracerAndSpan = spanFromGrpc(request, "dataChanged");
-        Span span = tracerAndSpan.span();
+    public void update(Routing.Rules rules) {
+        rules.post("/dataChanged", Handler.create(DataChangedRequest.class, this::dataChanged));
+    }
+
+    private void dataChanged(ServerRequest req, ServerResponse res, DataChangedRequest request) {
+        StreamObserver<DataChangedResponse> responseObserver;
+        Optional<Span> ospan = spanFromHttp(req, "dataChanged");
         try {
             String projectId = request.getProjectId();
             String topicName = request.getTopicName();
@@ -94,39 +102,39 @@ public class MetadataDistributorGrpcService extends MetadataDistributorServiceGr
                 @Override
                 public void onSuccess(String messageId) {
                     try {
-                        restoreTracingContext(tracerAndSpan);
-                        span.log(Map.of("event", "successfully published message", "messageId", messageId));
-                        responseObserver.onNext(DataChangedResponse.newBuilder().setMessageId(messageId).build());
-                        responseObserver.onCompleted();
+                        ospan.ifPresent(span -> restoreTracingContext(req.tracer(), span));
+                        ospan.ifPresent(span -> span.log(Map.of("event", "successfully published message", "messageId", messageId)));
+                        res.send(DataChangedResponse.newBuilder().setMessageId(messageId).build());
                     } finally {
-                        span.finish();
+                        ospan.ifPresent(Span::finish);
                     }
                 }
 
                 @Override
                 public void onFailure(Throwable t) {
                     try {
-                        restoreTracingContext(tracerAndSpan);
-                        LOG.error("while attempting to publish message to Google PubSub topic: " + publisher.getTopicNameString(), t);
-                        Tracing.logError(span, t, "while attempting to publish message to Google PubSub", "topic", publisher.getTopicNameString());
-                        responseObserver.onError(t);
+                        ospan.ifPresent(span -> restoreTracingContext(req.tracer(), span));
+                        String errorMsg = "while attempting to publish message to Google PubSub topic: " + publisher.getTopicNameString();
+                        LOG.error(errorMsg, t);
+                        ospan.ifPresent(span -> Tracing.logError(span, t, "while attempting to publish message to Google PubSub", "topic", publisher.getTopicNameString()));
+                        res.status(400).send(errorMsg);
                     } finally {
-                        span.finish();
+                        ospan.ifPresent(Span::finish);
                     }
                 }
             }, MoreExecutors.directExecutor());
         } catch (RuntimeException | Error | URISyntaxException | JsonProcessingException e) {
             try {
-                Tracing.logError(span, e);
+                ospan.ifPresent(span -> Tracing.logError(span, e));
                 LOG.error("unexpected error", e);
-                responseObserver.onError(e);
+                res.status(500).send("unexpected error");
             } finally {
-                span.finish();
+                ospan.ifPresent(Span::finish);
             }
         }
     }
 
-    public CompletableFuture<MetadataDistributorGrpcService> shutdown() {
+    public CompletableFuture<MetadataDistributorService> shutdown() {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 for (Publisher publisher : publisherByProjectTopicName.values()) {

@@ -11,9 +11,6 @@ import com.google.cloud.pubsub.v1.AckReplyConsumer;
 import com.google.cloud.pubsub.v1.MessageReceiver;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.cloud.pubsub.v1.Subscriber;
-import com.google.cloud.storage.Blob;
-import com.google.cloud.storage.BlobId;
-import com.google.cloud.storage.Storage;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.PubsubMessage;
@@ -27,35 +24,33 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static java.util.Optional.ofNullable;
-
 public class MetadataRouter {
 
     private static final Logger LOG = LoggerFactory.getLogger(MetadataRouter.class);
 
     final PubSub pubSub;
-    final Storage storage;
+    final Map<String, DatasetStore> datasetStoreByScheme = new ConcurrentHashMap<>();
     final List<Subscriber> subscribers = new CopyOnWriteArrayList<>();
     final List<Publisher> publishers = new CopyOnWriteArrayList<>();
     final MetadataSignatureVerifier metadataSignatureVerifier;
-    final String fileSystemDataFolder;
 
-    public MetadataRouter(Config routeConfig, PubSub pubSub, Storage storage, MetadataSignatureVerifier metadataSignatureVerifier, String fileSystemDataFolder) {
+    public MetadataRouter(Config routeConfig, PubSub pubSub, MetadataSignatureVerifier metadataSignatureVerifier, DatasetStore... datasetStores) {
         this.pubSub = pubSub;
-        this.storage = storage;
         this.metadataSignatureVerifier = metadataSignatureVerifier;
-        this.fileSystemDataFolder = fileSystemDataFolder;
+
+        for (DatasetStore datasetStore : datasetStores) {
+            datasetStoreByScheme.put(datasetStore.supportedScheme(), datasetStore);
+        }
 
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
@@ -94,82 +89,6 @@ public class MetadataRouter {
         }
     }
 
-    static MetadataReadAndVerifyResult resolveAndReadDatasetMeta(
-            Storage storage,
-            String fileSystemDataFolder,
-            MetadataSignatureVerifier metadataSignatureVerifier,
-            DatasetUri datasetUri
-    ) throws IOException {
-        byte[] datasetMetaBytes;
-        byte[] datasetDocBytes = null;
-        byte[] datasetLineageBytes = null;
-        byte[] datasetMetaSignatureBytes;
-        String datasetMetaJsonPath = datasetUri.toURI().getPath() + "/.dataset-meta.json";
-        String datasetDocJsonPath = datasetUri.toURI().getPath() + "/.dataset-doc.json";
-        String datasetLinageJsonPath = datasetUri.toURI().getPath() + "/.dataset-lineage.json";
-        String datasetMetaJsonSignaturePath = datasetUri.toURI().getPath() + "/.dataset-meta.json.sign";
-        String scheme = datasetUri.toURI().getScheme();
-        switch (scheme) {
-            case "file":
-                datasetMetaBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonPath));
-                if (Files.isReadable(Path.of(fileSystemDataFolder, datasetDocJsonPath))) {
-                    datasetDocBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetDocJsonPath));
-                }
-                if (Files.isReadable(Path.of(fileSystemDataFolder, datasetLinageJsonPath))) {
-                    datasetLineageBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetLinageJsonPath));
-                }
-                datasetMetaSignatureBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonSignaturePath));
-                break;
-            case "gs":
-                String bucket = datasetUri.toURI().getHost();
-                datasetMetaBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(datasetMetaJsonPath)));
-                BlobId datasetDocBlobId = BlobId.of(bucket, stripLeadingSlashes(datasetDocJsonPath));
-                Blob datasetDocBlob = storage.get(datasetDocBlobId);
-                if (datasetDocBlob != null) {
-                    datasetDocBytes = storage.readAllBytes(datasetDocBlobId);
-                }
-                BlobId datasetLineageBlobId = BlobId.of(bucket, stripLeadingSlashes(datasetLinageJsonPath));
-                Blob datasetLineageBlob = storage.get(datasetLineageBlobId);
-                if (datasetLineageBlob != null) {
-                    datasetLineageBytes = storage.readAllBytes(datasetLineageBlobId);
-                }
-
-                datasetMetaSignatureBytes = storage.readAllBytes(BlobId.of(bucket, stripLeadingSlashes(datasetMetaJsonSignaturePath)));
-                break;
-            default:
-                throw new RuntimeException("Scheme not supported. scheme='" + scheme + "'");
-        }
-        boolean verified = metadataSignatureVerifier.verify(datasetMetaBytes, datasetMetaSignatureBytes);
-        return new MetadataReadAndVerifyResult(verified,
-                ByteString.copyFrom(datasetMetaBytes),
-                ofNullable(datasetDocBytes).map(ByteString::copyFrom).orElse(null),
-                ofNullable(datasetLineageBytes).map(ByteString::copyFrom).orElse(null)
-        );
-    }
-
-    private static String stripLeadingSlashes(String input) {
-        return input.startsWith("/") ? stripLeadingSlashes(input.substring(1)) : input;
-    }
-
-    static class MetadataReadAndVerifyResult {
-
-        final boolean signatureValid;
-        final ByteString datasetMetaByteString;
-        final ByteString datasetDocByteString;
-        final ByteString datasetLineageByteString;
-
-        MetadataReadAndVerifyResult(boolean signatureValid,
-                                    ByteString datasetMetaByteString,
-                                    ByteString datasetDocByteString,
-                                    ByteString datasetLineageByteString) {
-            this.signatureValid = signatureValid;
-            this.datasetMetaByteString = datasetMetaByteString;
-            this.datasetDocByteString = datasetDocByteString;
-            this.datasetLineageByteString = datasetLineageByteString;
-        }
-
-    }
-
     static final ObjectMapper objectMapper = new ObjectMapper();
 
     class RouterMessageReceiver implements MessageReceiver {
@@ -186,14 +105,12 @@ public class MetadataRouter {
 
         @Override
         public void receiveMessage(PubsubMessage upstreamMessage, AckReplyConsumer consumer) {
-            process(storage, fileSystemDataFolder, metadataSignatureVerifier, publishers, topic, subscription, upstreamMessage, consumer::ack);
+            process(datasetStoreByScheme, publishers, topic, subscription, upstreamMessage, consumer::ack);
         }
     }
 
     static void process(
-            Storage storage,
-            String fileSystemDataFolder,
-            MetadataSignatureVerifier metadataSignatureVerifier,
+            Map<String, DatasetStore> datasetStoreByScheme,
             List<Publisher> publishers,
             String topic,
             String subscription,
@@ -259,7 +176,13 @@ public class MetadataRouter {
 
             DatasetUri datasetUri = DatasetUri.of(schemeAndAuthority, path, version);
 
-            MetadataReadAndVerifyResult metadataReadAndVerifyResult = resolveAndReadDatasetMeta(storage, fileSystemDataFolder, metadataSignatureVerifier, datasetUri);
+            String scheme = datasetUri.toURI().getScheme();
+            DatasetStore datasetStore = datasetStoreByScheme.get(scheme);
+            if (datasetStore == null) {
+                throw new IllegalArgumentException("Unsupported scheme: " + scheme);
+            }
+            MetadataReadAndVerifyResult metadataReadAndVerifyResult = datasetStore.resolveAndReadDatasetMeta(datasetUri);
+
             if (!metadataReadAndVerifyResult.signatureValid) {
                 LOG.warn("Invalid signature for metadata of dataset: {}", datasetUri.toString());
                 ack.run();
@@ -299,6 +222,10 @@ public class MetadataRouter {
                     JsonNode datasetMetaNode = objectMapper.readTree(inputStream);
                     downstreamMessageDataNode.set("dataset-lineage", datasetMetaNode);
                 }
+            }
+            if (metadataReadAndVerifyResult.schema != null) {
+                JsonNode avroSchemaNode = objectMapper.readTree(metadataReadAndVerifyResult.schema.toString());
+                downstreamMessageDataNode.set("avro-schema", avroSchemaNode);
             }
             ByteString downstreamMessageData = ByteString.copyFrom(objectMapper.writeValueAsBytes(downstreamMessageDataNode));
 
