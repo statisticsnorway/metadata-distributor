@@ -10,7 +10,7 @@ trigger:
 
 resources:
   containers:
-    - container: 'postgres_container_for_tests'
+    - container: 'pubsub_container_for_tests'
       image: statisticsnorway/pubsub-emulator:latest
       ports:
         - 8538:8538

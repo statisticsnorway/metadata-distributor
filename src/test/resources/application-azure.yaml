@@ -1,5 +1,5 @@
 webserver:
-  port: 0
+  port: -1
 
 tracing:
   enabled: false
@@ -7,7 +7,7 @@ tracing:
 pubsub:
   use-emulator: true
   emulator:
-    host: pubsub
+    host: postgres
     port: 8538
   credential-provider: emulator
   metadata-routing:

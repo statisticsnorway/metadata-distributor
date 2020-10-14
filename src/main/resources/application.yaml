@@ -4,10 +4,6 @@ webserver:
   access-log:
     format: "%h %u %t %r %s %b %{Referer}i %T"
 
-grpcserver:
-  host: 0.0.0.0
-  port: 10168
-
 tracing:
   enabled: true
   service: metadata-distributor
