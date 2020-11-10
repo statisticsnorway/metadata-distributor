@@ -124,7 +124,7 @@ class FilesystemMetadataPropagationTest {
 
         subscriberStartAsyncApiService.awaitRunning();
 
-        assertThat(latch.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(latch.await(10, TimeUnit.SECONDS)).isTrue();
     }
 
     private void initTopicAndSubscription(String projectId, String topic, String subscription) {
