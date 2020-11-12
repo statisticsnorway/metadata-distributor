@@ -17,7 +17,7 @@ RUN apk --no-cache add curl tar gzip nano jq
 # Resources from build image
 #
 COPY --from=build /linked /jdk/
-COPY --from=build /jdk/bin/jar /jdk/bin/jcmd /jdk/bin/jdb /jdk/bin/jfr /jdk/bin/jinfo /jdk/bin/jmap /jdk/bin/jps /jdk/bin/jstack /jdk/bin/jstat /jdk/bin/
+COPY --from=build /opt/jdk/bin/jar /opt/jdk/bin/jcmd /opt/jdk/bin/jdb /opt/jdk/bin/jfr /opt/jdk/bin/jinfo /opt/jdk/bin/jmap /opt/jdk/bin/jps /opt/jdk/bin/jstack /opt/jdk/bin/jstat /jdk/bin/
 COPY run.sh /app/
 COPY target/libs /app/lib/
 COPY target/metadata-distributor-*.jar /app/lib/
