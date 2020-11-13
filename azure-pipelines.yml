@@ -52,7 +52,7 @@ jobs:
       imageName: $(imageName)
       repoName: $(repoName)
       artifactName: metadata-distributor
-      mavenContainer: maven:3-adoptopenjdk-14
+      mavenContainer: maven:3-adoptopenjdk-15
       checkStyleRunAnalysis: false
 
   # Job which pulls the Docker image with the correct tag (image-scan-tag) from GCR, tags this
