@@ -1,9 +1,5 @@
 package no.ssb.dapla.metadata.distributor;
 
-import io.grpc.LoadBalancerRegistry;
-import io.grpc.NameResolverRegistry;
-import io.grpc.internal.DnsNameResolverProvider;
-import io.grpc.internal.PickFirstLoadBalancerProvider;
 import io.helidon.config.Config;
 import io.helidon.config.spi.ConfigSource;
 import io.helidon.tracing.TracerBuilder;
@@ -20,17 +16,6 @@ import static java.util.Optional.ofNullable;
 public class MetadataDistributorApplicationBuilder {
     protected Config config;
 
-    public static void applyGrpcProvidersWorkaround() {
-        // The shaded version of grpc from helidon does not include the service definition for
-        // PickFirstLoadBalancerProvider. This result in LoadBalancerRegistry not being able to
-        // find it. We register them manually here.
-        LoadBalancerRegistry.getDefaultRegistry().register(new PickFirstLoadBalancerProvider());
-        // LoadBalancerRegistry.getDefaultRegistry().register(new HealthCheckingRoundRobinLoadBalancerProvider());
-
-        // The same thing happens with the name resolvers.
-        NameResolverRegistry.getDefaultRegistry().register(new DnsNameResolverProvider());
-    }
-
     public static Config createDefaultConfig() {
         Config.Builder builder = Config.builder();
         List<Supplier<ConfigSource>> configSourceSupplierList = new LinkedList();
@@ -45,8 +30,6 @@ public class MetadataDistributorApplicationBuilder {
     }
 
     public MetadataDistributorApplication build() {
-        applyGrpcProvidersWorkaround();
-
         Config config = ofNullable(this.config).orElseGet(() -> createDefaultConfig());
 
         TracerBuilder<?> tracerBuilder = TracerBuilder.create(config.get("tracing")).registerGlobal(false);

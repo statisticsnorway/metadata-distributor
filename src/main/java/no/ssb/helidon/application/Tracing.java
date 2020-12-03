@@ -72,8 +72,6 @@ public class Tracing {
                         .buildSpan(operationName)
                         .asChildOf(ctx)
                         .start()
-                )
-                .map(Optional::of)
-                .orElse(Optional.empty());
+                );
     }
 }
