@@ -44,7 +44,7 @@ variables:
     value: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
 
 # Job which runs mvn test and verify, Sonar Analysis (if branch is master), mvn install,
-# builds Docker image, pushes this to GCR and checks for any image vulnerabilities
+# builds Docker image, pushes this to GCR and checks for any image vulnerabilities.
 jobs:
   - template: complete-builds/job-test-integration-coverage-build-gcr.yml@templates
     parameters:
