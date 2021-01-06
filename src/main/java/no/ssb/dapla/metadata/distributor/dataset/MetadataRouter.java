@@ -15,10 +15,13 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.PubsubMessage;
 import io.helidon.config.Config;
+import io.helidon.metrics.RegistryFactory;
 import no.ssb.dapla.dataset.api.DatasetMeta;
 import no.ssb.dapla.dataset.uri.DatasetUri;
 import no.ssb.helidon.media.protobuf.ProtobufJsonUtils;
 import no.ssb.pubsub.PubSub;
+import org.eclipse.microprofile.metrics.Counter;
+import org.eclipse.microprofile.metrics.MetricRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +47,22 @@ public class MetadataRouter {
     final List<Publisher> publishers = new CopyOnWriteArrayList<>();
     final MetadataSignatureVerifier metadataSignatureVerifier;
 
+    static class MDMetrics {
+        final Counter msgUpstreamReceivedCounter;
+        final Counter msgAckedCounter;
+        final Counter msgInsecureCounter;
+        final Counter msgDownstreamPublishedCounter;
+
+        MDMetrics() {
+            RegistryFactory metricsRegistry = RegistryFactory.getInstance();
+            MetricRegistry appRegistry = metricsRegistry.getRegistry(MetricRegistry.Type.APPLICATION);
+            this.msgUpstreamReceivedCounter = appRegistry.counter("msgUpstreamReceivedCount");
+            this.msgAckedCounter = appRegistry.counter("msgIgnoredCount");
+            this.msgInsecureCounter = appRegistry.counter("msgInvalidCount");
+            this.msgDownstreamPublishedCounter = appRegistry.counter("msgDownstreamPublishedCount");
+        }
+    }
+
     public MetadataRouter(Config routeConfig, PubSub pubSub, MetadataSignatureVerifier metadataSignatureVerifier, DatasetStore... datasetStores) {
         this.pubSub = pubSub;
         this.metadataSignatureVerifier = metadataSignatureVerifier;
@@ -51,6 +70,8 @@ public class MetadataRouter {
         for (DatasetStore datasetStore : datasetStores) {
             datasetStoreByScheme.put(datasetStore.supportedScheme(), datasetStore);
         }
+
+        MDMetrics mdMetrics = new MDMetrics();
 
         List<Config> upstreams = routeConfig.get("upstream").asNodeList().get();
         List<Config> downstreams = routeConfig.get("downstream").asNodeList().get();
@@ -70,7 +91,7 @@ public class MetadataRouter {
             String upstreamSubscriptionName = upstream.get("subscription").asString().get();
 
             if (subscribe) {
-                MessageReceiver messageReceiver = new RouterMessageReceiver(upstreamProjectId, upstreamTopicName, upstreamSubscriptionName);
+                MessageReceiver messageReceiver = new RouterMessageReceiver(mdMetrics, upstreamProjectId, upstreamTopicName, upstreamSubscriptionName);
                 LOG.info("Creating subscriber on subscription: {}", upstreamSubscriptionName);
                 Subscriber subscriber = pubSub.getSubscriber(upstreamProjectId, upstreamSubscriptionName, messageReceiver);
                 subscriber.addListener(
@@ -93,11 +114,13 @@ public class MetadataRouter {
 
     class RouterMessageReceiver implements MessageReceiver {
 
+        final MDMetrics mdMetrics;
         final String projectId;
         final String topic;
         final String subscription;
 
-        RouterMessageReceiver(String projectId, String topic, String subscription) {
+        RouterMessageReceiver(MDMetrics mdMetrics, String projectId, String topic, String subscription) {
+            this.mdMetrics = mdMetrics;
             this.projectId = projectId;
             this.topic = topic;
             this.subscription = subscription;
@@ -105,11 +128,12 @@ public class MetadataRouter {
 
         @Override
         public void receiveMessage(PubsubMessage upstreamMessage, AckReplyConsumer consumer) {
-            process(datasetStoreByScheme, publishers, topic, subscription, upstreamMessage, consumer::ack);
+            process(mdMetrics, datasetStoreByScheme, publishers, topic, subscription, upstreamMessage, consumer::ack);
         }
     }
 
     static void process(
+            MDMetrics metrics,
             Map<String, DatasetStore> datasetStoreByScheme,
             List<Publisher> publishers,
             String topic,
@@ -118,23 +142,33 @@ public class MetadataRouter {
             Runnable ack
     ) {
         try {
+            metrics.msgUpstreamReceivedCounter.inc();
             Map<String, String> attributes = upstreamMessage.getAttributesMap();
 
             String payloadFormat = attributes.get("payloadFormat");
             if (!(payloadFormat.equals("JSON_API_V1") || payloadFormat.equals("DAPLA_JSON_API_V1"))) {
-                throw new RuntimeException("Ignoring message. Not a valid payloadFormat");
+                LOG.warn("Ignoring message. Not a valid payloadFormat");
+                ack.run();
+                metrics.msgAckedCounter.inc();
+                return;
             }
 
             String eventType = attributes.get("eventType");
             if (!"OBJECT_FINALIZE".equals(eventType)) {
-                throw new RuntimeException("Ignoring message. eventType OBJECT_FINALIZE is the only one supported!");
+                LOG.warn("Ignoring message. eventType OBJECT_FINALIZE is the only one supported!");
+                ack.run();
+                metrics.msgAckedCounter.inc();
+                return;
             }
 
             JsonNode upstreamJson;
             try {
                 upstreamJson = objectMapper.readTree(upstreamMessage.getData().toStringUtf8());
             } catch (JsonProcessingException e) {
-                throw new RuntimeException(e);
+                LOG.warn("Ignoring message. Message data is not valid json!");
+                ack.run();
+                metrics.msgAckedCounter.inc();
+                return;
             }
 
             String name = upstreamJson.get("name").textValue();
@@ -145,6 +179,7 @@ public class MetadataRouter {
             if (!m.matches()) {
                 LOG.debug("Ignored message due to name not matching pattern 'name/of/dataset/version/filename', name: {}", name);
                 ack.run();
+                metrics.msgAckedCounter.inc();
                 return;
             }
 
@@ -155,6 +190,7 @@ public class MetadataRouter {
             if (!".dataset-meta.json.sign".equals(filename)) {
                 LOG.debug("Ignored message with filename: {}", upstreamJson);
                 ack.run();
+                metrics.msgAckedCounter.inc();
                 return;
             }
 
@@ -184,8 +220,10 @@ public class MetadataRouter {
             MetadataReadAndVerifyResult metadataReadAndVerifyResult = datasetStore.resolveAndReadDatasetMeta(datasetUri);
 
             if (!metadataReadAndVerifyResult.signatureValid) {
+                metrics.msgInsecureCounter.inc();
                 LOG.warn("Invalid signature for metadata of dataset: {}", datasetUri.toString());
                 ack.run();
+                metrics.msgAckedCounter.inc();
                 return;
             }
 
@@ -194,13 +232,16 @@ public class MetadataRouter {
             if (publishers.isEmpty()) {
                 LOG.warn("Message ignored due to no configured downstream publishers!");
                 ack.run();
+                metrics.msgAckedCounter.inc();
                 return;
             }
 
             DatasetMeta datasetMeta = ProtobufJsonUtils.toPojo(metadataReadAndVerifyResult.datasetMetaByteString.toStringUtf8(), DatasetMeta.class);
             if (!name.endsWith(datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign")) {
+                metrics.msgInsecureCounter.inc();
                 LOG.error("Path validation failed! 'name' does not end with dataset-uri matching id.path and id.version from dataset-meta.json");
                 ack.run();
+                metrics.msgAckedCounter.inc();
                 return;
             }
             String parentUri = schemeAndAuthority + name.substring(0, name.lastIndexOf(datasetMeta.getId().getPath()));
@@ -239,7 +280,9 @@ public class MetadataRouter {
                             @Override
                             public void onSuccess(String result) {
                                 if (succeeded.incrementAndGet() == publishers.size()) {
+                                    metrics.msgDownstreamPublishedCounter.inc();
                                     ack.run();
+                                    metrics.msgAckedCounter.inc();
                                 }
                             }
 

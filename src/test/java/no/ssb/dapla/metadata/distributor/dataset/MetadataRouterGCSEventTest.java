@@ -88,11 +88,13 @@ public class MetadataRouterGCSEventTest {
 
         CountDownLatch latch = new CountDownLatch(2);
 
+        MetadataRouter.MDMetrics mdMetrics = new MetadataRouter.MDMetrics();
+
         MessageReceiver messageReceiver = (message, consumer) -> {
             try {
                 System.out.printf("message: %s%n", message);
 
-                MetadataRouter.process(datasetStoreByScheme, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, consumer::ack);
+                MetadataRouter.process(mdMetrics, datasetStoreByScheme, Collections.emptyList(), upstreamTopicName, upstreamSubscriptionName, message, consumer::ack);
 
                 Map<String, String> attributes = message.getAttributesMap();
                 String objectId = attributes.get("objectId");

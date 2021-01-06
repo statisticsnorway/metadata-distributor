@@ -11,7 +11,7 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.ProjectTopicName;
 import com.google.pubsub.v1.PubsubMessage;
-import io.grpc.stub.StreamObserver;
+import io.helidon.metrics.RegistryFactory;
 import io.helidon.webserver.Handler;
 import io.helidon.webserver.Routing;
 import io.helidon.webserver.ServerRequest;
@@ -22,6 +22,8 @@ import no.ssb.dapla.metadata.distributor.protobuf.DataChangedRequest;
 import no.ssb.dapla.metadata.distributor.protobuf.DataChangedResponse;
 import no.ssb.helidon.application.Tracing;
 import no.ssb.pubsub.PubSub;
+import org.eclipse.microprofile.metrics.Counter;
+import org.eclipse.microprofile.metrics.MetricRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,8 +46,15 @@ public class MetadataDistributorService implements Service {
     final Map<ProjectTopicName, Publisher> publisherByProjectTopicName = new ConcurrentHashMap<>();
     final ObjectMapper mapper = new ObjectMapper();
 
+    private final Counter dataChangedRequestCounter;
+    private final Counter dataChangedRequestSuccessCounter;
+
     public MetadataDistributorService(PubSub pubSub) {
         this.pubSub = pubSub;
+        RegistryFactory metricsRegistry = RegistryFactory.getInstance();
+        MetricRegistry appRegistry = metricsRegistry.getRegistry(MetricRegistry.Type.APPLICATION);
+        dataChangedRequestCounter = appRegistry.counter("dataChangedRequestCount");
+        dataChangedRequestSuccessCounter = appRegistry.counter("dataChangedRequestSuccessCount");
     }
 
     @Override
@@ -54,7 +63,7 @@ public class MetadataDistributorService implements Service {
     }
 
     private void dataChanged(ServerRequest req, ServerResponse res, DataChangedRequest request) {
-        StreamObserver<DataChangedResponse> responseObserver;
+        dataChangedRequestCounter.inc();
         Optional<Span> ospan = spanFromHttp(req, "dataChanged");
         try {
             String projectId = request.getProjectId();
@@ -102,6 +111,7 @@ public class MetadataDistributorService implements Service {
                 @Override
                 public void onSuccess(String messageId) {
                     try {
+                        dataChangedRequestSuccessCounter.inc();
                         ospan.ifPresent(span -> restoreTracingContext(req.tracer(), span));
                         ospan.ifPresent(span -> span.log(Map.of("event", "successfully published message", "messageId", messageId)));
                         res.send(DataChangedResponse.newBuilder().setMessageId(messageId).build());

@@ -1,10 +1,13 @@
 package no.ssb.dapla.metadata.distributor.dataset;
 
 import com.google.protobuf.ByteString;
+import io.helidon.metrics.RegistryFactory;
 import no.ssb.dapla.dataset.uri.DatasetUri;
 import no.ssb.dapla.metadata.distributor.parquet.NIOPathBasedInputFile;
 import no.ssb.dapla.metadata.distributor.parquet.ParquetTools;
 import org.apache.avro.Schema;
+import org.eclipse.microprofile.metrics.Meter;
+import org.eclipse.microprofile.metrics.MetricRegistry;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -17,9 +20,20 @@ public class FilesystemDatasetStore implements DatasetStore {
     final String fileSystemDataFolder;
     final MetadataSignatureVerifier metadataSignatureVerifier;
 
+    private final Meter fsCheckFileMeter;
+    private final Meter fsReadFileMeter;
+    private final Meter fsListMeter;
+    private final Meter fsReadParquetSchemaMeter;
+
     public FilesystemDatasetStore(String fileSystemDataFolder, MetadataSignatureVerifier metadataSignatureVerifier) {
         this.fileSystemDataFolder = fileSystemDataFolder;
         this.metadataSignatureVerifier = metadataSignatureVerifier;
+        RegistryFactory metricsRegistry = RegistryFactory.getInstance();
+        MetricRegistry appRegistry = metricsRegistry.getRegistry(MetricRegistry.Type.APPLICATION);
+        this.fsCheckFileMeter = appRegistry.meter("fsCheckFileMeter");
+        this.fsReadFileMeter = appRegistry.meter("fsReadFileMeter");
+        this.fsListMeter = appRegistry.meter("fsListMeter");
+        this.fsReadParquetSchemaMeter = appRegistry.meter("fsReadParquetSchemaMeter");
     }
 
     @Override
@@ -35,13 +49,19 @@ public class FilesystemDatasetStore implements DatasetStore {
             String datasetMetaJsonSignaturePath = datasetUri.toURI().getPath() + "/.dataset-meta.json.sign";
             Schema avroSchema;
             datasetMetaBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonPath));
+            fsReadFileMeter.mark();
             if (Files.isReadable(Path.of(fileSystemDataFolder, datasetDocJsonPath))) {
                 datasetDocBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetDocJsonPath));
+                fsReadFileMeter.mark();
             }
+            fsCheckFileMeter.mark();
             if (Files.isReadable(Path.of(fileSystemDataFolder, datasetLinageJsonPath))) {
                 datasetLineageBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetLinageJsonPath));
+                fsReadFileMeter.mark();
             }
+            fsCheckFileMeter.mark();
             datasetMetaSignatureBytes = Files.readAllBytes(Path.of(fileSystemDataFolder, datasetMetaJsonSignaturePath));
+            fsReadFileMeter.mark();
             avroSchema = getAvroSchemaFromLocalFileSystem(datasetUri);
             boolean verified = metadataSignatureVerifier.verify(datasetMetaBytes, datasetMetaSignatureBytes);
             return new MetadataReadAndVerifyResult(verified,
@@ -60,10 +80,11 @@ public class FilesystemDatasetStore implements DatasetStore {
         return "file";
     }
 
-    private static Schema getAvroSchemaFromLocalFileSystem(DatasetUri datasetUri) {
+    private Schema getAvroSchemaFromLocalFileSystem(DatasetUri datasetUri) {
         Path firstParquetFile;
         try {
             String datasetFolder = datasetUri.toURI().getRawPath();
+            fsListMeter.mark();
             firstParquetFile = Files.list(Path.of(datasetFolder))
                     .filter(p -> p.getFileName().toString().endsWith(".parquet"))
                     .findFirst()
@@ -72,6 +93,7 @@ public class FilesystemDatasetStore implements DatasetStore {
             throw new RuntimeException(e);
         }
         Schema schema = ParquetTools.getAvroSchemaFromFile(new NIOPathBasedInputFile(firstParquetFile));
+        fsReadParquetSchemaMeter.mark();
         return schema;
     }
 }
