@@ -150,9 +150,6 @@ public class MetadataDistributorApplication {
                 .register(MetricsSupport.create())
                 .register(health)
                 .register("/rpc/MetadataDistributorService", metadataDistributorService)
-                .get("/hei", (req, res) -> {
-                    res.status(200).send();
-                })
                 .build();
         put(Routing.class, routing);
 
