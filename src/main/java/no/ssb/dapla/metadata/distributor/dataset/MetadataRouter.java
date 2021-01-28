@@ -145,6 +145,7 @@ public class MetadataRouter {
             metrics.msgUpstreamReceivedCounter.inc();
             Map<String, String> attributes = upstreamMessage.getAttributesMap();
 
+            // https://cloud.google.com/storage/docs/pubsub-notifications#payload
             String payloadFormat = attributes.get("payloadFormat");
             if (!(payloadFormat.equals("JSON_API_V1") || payloadFormat.equals("DAPLA_JSON_API_V1"))) {
                 LOG.warn("Ignoring message. Not a valid payloadFormat");
@@ -153,6 +154,7 @@ public class MetadataRouter {
                 return;
             }
 
+            // https://cloud.google.com/storage/docs/pubsub-notifications#events
             String eventType = attributes.get("eventType");
             if (!"OBJECT_FINALIZE".equals(eventType)) {
                 LOG.warn("Ignoring message. eventType OBJECT_FINALIZE is the only one supported!");
@@ -161,6 +163,10 @@ public class MetadataRouter {
                 return;
             }
 
+            // TODO: If OBJECT_DELETE && endsWith(".dataset-meta.json.sign") Forward.
+
+            // Payload format:
+            // https://cloud.google.com/storage/docs/json_api/v1/objects#resource-representations
             JsonNode upstreamJson;
             try {
                 upstreamJson = objectMapper.readTree(upstreamMessage.getData().toStringUtf8());
@@ -171,6 +177,9 @@ public class MetadataRouter {
                 return;
             }
 
+            // TODO: attributes.get("objectId") should return the same.
+
+            // 	The name of the object. Required if not specified by URL parameter.
             String name = upstreamJson.get("name").textValue();
 
             Pattern pattern = Pattern.compile("(?<path>.+)/(?<version>[^/]+)/(?<filename>[^/]+)");
@@ -194,13 +203,29 @@ public class MetadataRouter {
                 return;
             }
 
+            // The kind of item this is. For objects, this is always storage#object.
+            // NB: Looks like this field contains another value when the service is used
+            // in the localstack
+            // See if ("filesystem".equals(kind)) down below.
             String kind = upstreamJson.get("kind").textValue();
 
             String schemeAndAuthority;
             if ("storage#object".equals(kind)) {
+
+                // Property type is long.
+                // The content generation of this object. Used for object versioning.
                 // String generation = upstreamJson.get("generation").textValue();
+
+                // Property type is long.
+                // The version of the metadata for this object at this generation.
+                // Used for preconditions and for detecting changes in metadata.
+                // A metageneration number is only meaningful in the context of a particular
+                // generation of a particular object.
                 // String metageneration = upstreamJson.get("metageneration").textValue();
+
+                // The name of the bucket containing this object.
                 String bucket = upstreamJson.get("bucket").textValue();
+
                 schemeAndAuthority = "gs://" + bucket;
             } else if ("filesystem".equals(kind)) {
                 schemeAndAuthority = "file://";
@@ -229,6 +254,8 @@ public class MetadataRouter {
 
             final AtomicInteger succeeded = new AtomicInteger(0);
 
+            // TODO: Maybe move to the beginning of this method?
+            // TODO: Even better, refactor to separate routing concern and processing concern.
             if (publishers.isEmpty()) {
                 LOG.warn("Message ignored due to no configured downstream publishers!");
                 ack.run();
@@ -236,6 +263,9 @@ public class MetadataRouter {
                 return;
             }
 
+            // GCS -> topicX -> metadata-distributor -> topicY -> catalog
+            //                                       -> topicZ -> exploration
+            // What are the dlq topics?
             DatasetMeta datasetMeta = ProtobufJsonUtils.toPojo(metadataReadAndVerifyResult.datasetMetaByteString.toStringUtf8(), DatasetMeta.class);
             if (!name.endsWith(datasetMeta.getId().getPath() + "/" + datasetMeta.getId().getVersion() + "/.dataset-meta.json.sign")) {
                 metrics.msgInsecureCounter.inc();
@@ -244,7 +274,27 @@ public class MetadataRouter {
                 metrics.msgAckedCounter.inc();
                 return;
             }
+
+            // name: /foo/bar/[name]/[version]/.dataset-meta.json.sign
+            // schemeAndAuthority: ( gs:// | file:// )
+            //
+            // parentUri: schemeAndAuthority + /foo/bar/[name]/
+            //
+            // IE: Dataset URI.
             String parentUri = schemeAndAuthority + name.substring(0, name.lastIndexOf(datasetMeta.getId().getPath()));
+
+            // Attribute:
+            //  parentUri
+            //
+            // Format:
+            // {
+            //   parentUri:              # required. Dataset URI
+            //   dataset-meta:           # nullable. Bytes from .dataset-meta.json file.
+            //   dataset-doc:            # nullable. Bytes from .dataset-doc.json file.
+            //   dataset-lineage:        # nullable. Bytes from .dataset-lineage.json file.
+            //   avro-schema:            # nullable. Bytes from json representation of the
+            //                           # avro schema, which is converted from the parquet schema.
+            // }
 
             ObjectNode downstreamMessageDataNode = objectMapper.createObjectNode();
             downstreamMessageDataNode.put("parentUri", parentUri);
@@ -269,6 +319,11 @@ public class MetadataRouter {
                 downstreamMessageDataNode.set("avro-schema", avroSchemaNode);
             }
             ByteString downstreamMessageData = ByteString.copyFrom(objectMapper.writeValueAsBytes(downstreamMessageDataNode));
+
+            // TODO: Control question: given that more than one subscription can be set up on
+            //  the same topic, what is the point of the routing logic in this component?
+            //  This is even more true since the same logic will apply to all downstream/upstream
+            //  and the same downstream is used.
 
             for (Publisher publisher : publishers) {
                 PubsubMessage downstreamMessage = PubsubMessage.newBuilder()
